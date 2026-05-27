@@ -80,6 +80,26 @@ try {
     "--evidence",
     "smoke test learning"
   ]);
+  const instructionPrint = run(["install-codex-instructions", "--print"]);
+  if (!instructionPrint.includes("codex-homunculus:start") || !instructionPrint.includes("Homunculus Bootstrap")) {
+    throw new Error("install-codex-instructions --print did not emit the expected block");
+  }
+  const agentsPath = join(root, "AGENTS.md");
+  run(["install-codex-instructions", "--target", agentsPath, "--yes"]);
+  run(["install-codex-instructions", "--target", agentsPath, "--yes"]);
+  const agentsText = readFileSync(agentsPath, "utf8");
+  const markerCount = agentsText.match(/codex-homunculus:start/g)?.length || 0;
+  if (markerCount !== 1 || !agentsText.includes("apply --context")) {
+    throw new Error("install-codex-instructions did not idempotently write AGENTS.md");
+  }
+  const outsideRefused = runRaw(["install-codex-instructions", "--target", join(tmpdir(), "codex-homunculus-outside.md")]);
+  if (outsideRefused.status === 0 || !outsideRefused.stderr.includes("outside the current project root")) {
+    throw new Error("outside target write was not refused without --yes");
+  }
+  const globalRefused = runRaw(["install-codex-instructions", "--global"]);
+  if (globalRefused.status === 0 || !globalRefused.stderr.includes("--global writes")) {
+    throw new Error("global instruction install was not refused without --yes");
+  }
   const refused = runRaw(["observe", "--text", "token=super-secret-value"]);
   if (refused.status === 0 || !refused.stderr.includes("sensitive material")) {
     throw new Error("sensitive observation was not refused");

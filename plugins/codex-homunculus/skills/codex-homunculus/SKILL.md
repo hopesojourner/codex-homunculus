@@ -1,11 +1,12 @@
 ---
 name: codex-homunculus
-description: Local-first Homunculus-style memory for Codex. Use when the user asks Codex to remember or apply learned workflow preferences, initialize project memory, inspect or evolve instincts, import/export Codex Homunculus state, or build on prior session behavior without Claude Code hooks.
+description: Local-first Homunculus-style memory for Codex. Use when the user asks Codex to remember or apply learned workflow preferences, initialize project memory, inspect or evolve instincts, import/export Codex Homunculus state, install AGENTS.md Codex bootstrap instructions, make Homunculus more automatic, or build on prior session behavior without Claude Code hooks.
 ---
 
 # Codex Homunculus
 
 Use this skill to manage project-local learned instincts for Codex. For exact file schemas, read `references/state-format.md` only when editing state files, debugging imports, or building tooling around the state format.
+For automation tradeoffs, repo/global instruction bootstrapping, scheduled jobs, or wrappers, read `references/automation-options.md`.
 
 ## Core model
 
@@ -55,7 +56,15 @@ node <plugin-root>\scripts\homunculus.mjs evolve --min-count 3
 node <plugin-root>\scripts\homunculus.mjs validate
 ```
 
-7. For portability between repos or machines, use:
+7. To install or refresh repo-local Codex bootstrap instructions, run from the repo root:
+
+```powershell
+node <plugin-root>\scripts\homunculus.mjs install-codex-instructions
+```
+
+Use `--print` to inspect the block without writing. Use `--global --yes` or an out-of-repo `--target <path> --yes` only after explicit user approval.
+
+8. For portability between repos or machines, use:
 
 ```powershell
 node <plugin-root>\scripts\homunculus.mjs export --output homunculus-export.json
@@ -75,6 +84,7 @@ node <plugin-root>\scripts\homunculus.mjs import --input homunculus-export.json
 - `evolve`: create deterministic domain summaries from repeated instincts.
 - `export`: write a JSON bundle containing identity and instincts.
 - `import`: import a JSON bundle into inherited instincts by default without overwriting existing files.
+- `install-codex-instructions`: add or update a marked AGENTS.md bootstrap block for start/apply/learn workflow steps.
 - `doctor`: verify that the local state layout is readable and writable.
 - `validate`: check state files, JSONL records, instinct metadata, duplicate IDs, confidence values, and sensitive-data warnings.
 
@@ -85,4 +95,4 @@ node <plugin-root>\scripts\homunculus.mjs import --input homunculus-export.json
 - Prefer project-local state. Use `--root <path>` only when the user asks for a non-default location.
 - Before persisting potentially sensitive facts, ask the user.
 - Use `--allow-sensitive` only after explicit user approval, and prefer redaction instead.
-- If automatic hook behavior is requested, explain that this Codex port uses explicit CLI-backed workflow steps unless a future Codex hook surface is available.
+- If automatic hook behavior is requested, use `install-codex-instructions` for repo-level bootstrap instructions and explain that every-message hooks require a future Codex hook surface or an external wrapper.

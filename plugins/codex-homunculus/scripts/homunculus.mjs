@@ -2,10 +2,13 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync } from "node:fs";
-import { basename, dirname, join, resolve } from "node:path";
+import { homedir } from "node:os";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import process from "node:process";
 
-const VERSION = "0.2.0";
+const VERSION = "0.3.0";
+const INSTRUCTION_BLOCK_START = "<!-- codex-homunculus:start -->";
+const INSTRUCTION_BLOCK_END = "<!-- codex-homunculus:end -->";
 const REQUIRED_INSTINCT_FIELDS = ["id", "title", "domain", "trigger", "action", "confidence", "source", "created_at", "updated_at"];
 const SENSITIVE_PATTERNS = [
   ["private key block", /-----BEGIN [A-Z ]*PRIVATE KEY-----/i],
@@ -130,6 +133,52 @@ function stateRoot(options) {
     return resolve(process.env.CODEX_HOMUNCULUS_DIR);
   }
   return join(projectInfo(process.cwd()).root, ".codex", "homunculus");
+}
+
+function defaultCodexInstructionTarget(options) {
+  if (options.target) {
+    return resolve(String(options.target));
+  }
+  if (options.global) {
+    const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
+    return join(codexHome, "AGENTS.md");
+  }
+  return join(projectInfo(process.cwd()).root, "AGENTS.md");
+}
+
+function isWithin(path, parent) {
+  const rel = relative(parent, path);
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+function codexInstructionBlock(options = {}) {
+  const command = String(options["script-command"] || "node plugins/codex-homunculus/scripts/homunculus.mjs");
+  return `${INSTRUCTION_BLOCK_START}
+## Codex Homunculus Bootstrap
+
+For repo tasks in this workspace:
+
+1. Before planning or editing, run \`${command} start\`.
+2. Apply relevant learned instincts with \`${command} apply --context "<short task summary>"\`.
+3. Use only relevant instincts; treat them as guidance, not proof.
+4. Before the final response, if the task produced a durable workflow lesson or the user corrected Codex behavior, ask before storing it, then run \`${command} learn --domain "<domain>" --trigger "<specific trigger>" --action "<specific action>" --evidence "<brief evidence>"\`.
+5. Do not store secrets, credentials, private customer data, or tokens. Prefer redaction.
+6. Do not claim every-turn hooks, background observation, or scheduled behavior unless a separate wrapper or automation has been explicitly installed and verified.
+
+${INSTRUCTION_BLOCK_END}`;
+}
+
+function upsertInstructionBlock(existing, block) {
+  if (!existing.trim()) {
+    return `${block}\n`;
+  }
+  const start = existing.indexOf(INSTRUCTION_BLOCK_START);
+  const end = existing.indexOf(INSTRUCTION_BLOCK_END);
+  if (start !== -1 && end !== -1 && end > start) {
+    const afterEnd = end + INSTRUCTION_BLOCK_END.length;
+    return `${existing.slice(0, start)}${block}${existing.slice(afterEnd)}`.replace(/\s+$/u, "\n");
+  }
+  return `${existing.replace(/\s+$/u, "")}\n\n${block}\n`;
 }
 
 function dirs(root) {
@@ -661,6 +710,28 @@ function commandImport(root, options) {
   console.log(`imported ${imported} instincts into ${scope}`);
 }
 
+function commandInstallCodexInstructions(root, options) {
+  const block = codexInstructionBlock(options);
+  if (options.print) {
+    console.log(block);
+    return;
+  }
+
+  const target = defaultCodexInstructionTarget(options);
+  const projectRoot = projectInfo(process.cwd()).root;
+  if (options.global && !options.yes) {
+    die("--global writes to CODEX_HOME or ~/.codex. Rerun with --yes after explicit approval.");
+  }
+  if (!isWithin(target, projectRoot) && !options.yes) {
+    die(`target is outside the current project root: ${target}. Rerun with --yes after explicit approval.`);
+  }
+
+  ensureDir(dirname(target));
+  const existing = existsSync(target) ? readFileSync(target, "utf8") : "";
+  writeFileSync(target, upsertInstructionBlock(existing, block), "utf8");
+  console.log(`Codex Homunculus instructions installed: ${target}`);
+}
+
 function parseJsonl(path, errors) {
   if (!existsSync(path)) {
     return;
@@ -802,6 +873,8 @@ Commands:
   evolve               Create domain summaries from repeated instincts.
   export               Export identity and instincts to JSON.
   import               Import a JSON export into inherited instincts.
+  install-codex-instructions
+                       Add/update an AGENTS.md Homunculus bootstrap block.
   doctor               Verify state layout.
   validate             Validate state files, JSONL, and instinct metadata.
 
@@ -809,6 +882,14 @@ Common options:
   --root <path>        Override state root.
   --json               Print machine-readable JSON where supported.
   --allow-sensitive    Permit persistence of sensitive-looking text.
+
+install-codex-instructions options:
+  --target <path>      Write to a specific AGENTS.md-style file.
+  --global             Target CODEX_HOME/AGENTS.md or ~/.codex/AGENTS.md.
+  --yes                Confirm writes outside the current project root.
+  --print              Print the instruction block without writing.
+  --script-command <command>
+                       Command to embed in the instruction block.
 `);
 }
 
@@ -850,6 +931,9 @@ function main() {
       break;
     case "import":
       commandImport(root, options);
+      break;
+    case "install-codex-instructions":
+      commandInstallCodexInstructions(root, options);
       break;
     case "doctor":
       commandDoctor(root, options);
