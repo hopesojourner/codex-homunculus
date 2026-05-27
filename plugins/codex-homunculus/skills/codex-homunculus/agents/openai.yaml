@@ -1,0 +1,4 @@
+interface:
+  display_name: "Codex Homunculus"
+  short_description: "Local instinct memory for Codex workflows"
+  default_prompt: "Use $codex-homunculus to start this repo and apply learned instincts."

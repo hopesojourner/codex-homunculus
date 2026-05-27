@@ -1,0 +1,38 @@
+{
+  "name": "codex-homunculus",
+  "version": "0.2.0",
+  "description": "Local-first Homunculus-style memory, instinct validation, and evolution for Codex.",
+  "author": {
+    "name": "Local developer",
+    "url": "https://github.com/humanplane/homunculus"
+  },
+  "homepage": "https://github.com/humanplane/homunculus",
+  "repository": "https://github.com/humanplane/homunculus",
+  "license": "MIT",
+  "keywords": [
+    "codex",
+    "homunculus",
+    "memory",
+    "skills",
+    "instincts",
+    "workflow"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Codex Homunculus",
+    "shortDescription": "Validated local instinct memory for Codex",
+    "longDescription": "Codex Homunculus adapts Homunculus-style session memory into a Codex-native plugin with project-local state, Markdown instincts, sensitive-data guardrails, import/export, validation, and deterministic evolution summaries. It does not depend on Claude Code hooks.",
+    "developerName": "Local developer",
+    "category": "Coding",
+    "capabilities": [
+      "Interactive",
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Use Codex Homunculus to start this repo.",
+      "Apply learned instincts before changing this code.",
+      "Save this workflow lesson as an instinct."
+    ]
+  }
+}

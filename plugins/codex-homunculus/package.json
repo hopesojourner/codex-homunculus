@@ -1,0 +1,20 @@
+{
+  "name": "codex-homunculus",
+  "version": "0.2.0",
+  "private": true,
+  "description": "Codex-native Homunculus-style local memory and instincts.",
+  "type": "module",
+  "bin": {
+    "codex-homunculus": "./scripts/homunculus.mjs"
+  },
+  "scripts": {
+    "check": "node --check scripts/homunculus.mjs && node --check scripts/smoke-test.mjs",
+    "test": "node scripts/smoke-test.mjs",
+    "doctor": "node scripts/homunculus.mjs doctor",
+    "validate-state": "node scripts/homunculus.mjs validate"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "license": "MIT"
+}

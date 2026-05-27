@@ -1,0 +1,6 @@
+.tmp/
+node_modules/
+*.tgz
+.codex/homunculus/
+npm-debug.log*
+*.log
