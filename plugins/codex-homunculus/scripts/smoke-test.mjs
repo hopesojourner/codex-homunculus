@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 
 const root = mkdtempSync(join(tmpdir(), "codex-homunculus-test-"));
 const script = fileURLToPath(new URL("./homunculus.mjs", import.meta.url));
+const commandWrapper = fileURLToPath(new URL("./codex-homunculus.cmd", import.meta.url));
 
 function run(args) {
   const result = runRaw(args);
@@ -133,6 +134,16 @@ try {
   const inherited = readdirSync(join(root, "instincts", "inherited")).filter((name) => name.endsWith(".md"));
   if (inherited.length !== 2) {
     throw new Error("duplicate imports did not create unique inherited files");
+  }
+  if (process.platform === "win32") {
+    const wrapperHelp = spawnSync("cmd.exe", ["/c", commandWrapper, "--help"], {
+      encoding: "utf8",
+      env: { ...process.env, CODEX_HOMUNCULUS_DIR: root },
+      windowsHide: true
+    });
+    if (wrapperHelp.status !== 0 || !wrapperHelp.stdout.includes("Codex Homunculus")) {
+      throw new Error("Windows codex-homunculus wrapper did not run the CLI");
+    }
   }
   run(["doctor"]);
   run(["validate"]);

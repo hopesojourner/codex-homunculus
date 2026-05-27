@@ -33,6 +33,13 @@ Codex automations can run scheduled jobs or thread wakeups. They are useful for 
 
 A wrapper script can launch Codex, run Homunculus before and after sessions, and enforce local conventions outside the plugin. This can be useful for a local workflow, but it sits outside Codex's plugin system and cannot observe internal conversation state unless Codex exposes a compatible interface.
 
+On Windows, install the bundled wrappers from `scripts/` into a stable directory such as `%USERPROFILE%\.codex\bin`:
+
+- `codex-homunculus.cmd`: runs the Homunculus CLI from the installed plugin copy.
+- `codex-with-homunculus.cmd`: runs `start` and `apply`, launches `codex`, then validates Homunculus state after Codex exits.
+
+Use `codex-with-homunculus.cmd --dry-run` to verify the wrapper without launching an interactive Codex session.
+
 ## Recommended Boundary
 
 Prefer this order:

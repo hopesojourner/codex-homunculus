@@ -62,3 +62,11 @@ prior behavior, or Homunculus automation. Scheduled Codex automations can run
 periodic jobs, but they do not hook into every message or tool call. External
 wrappers can enforce before/after commands outside Codex, but they cannot see
 internal conversation state unless Codex exposes that state.
+
+Windows wrapper scripts are included in `plugins\codex-homunculus\scripts`:
+
+```powershell
+codex-homunculus.cmd --help
+codex-with-homunculus.cmd --dry-run
+codex-with-homunculus.cmd
+```

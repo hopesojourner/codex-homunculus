@@ -6,7 +6,7 @@ import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import process from "node:process";
 
-const VERSION = "0.3.0";
+const VERSION = "0.4.0";
 const INSTRUCTION_BLOCK_START = "<!-- codex-homunculus:start -->";
 const INSTRUCTION_BLOCK_END = "<!-- codex-homunculus:end -->";
 const REQUIRED_INSTINCT_FIELDS = ["id", "title", "domain", "trigger", "action", "confidence", "source", "created_at", "updated_at"];
