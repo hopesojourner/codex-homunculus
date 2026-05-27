@@ -70,3 +70,14 @@ codex-homunculus.cmd --help
 codex-with-homunculus.cmd --dry-run
 codex-with-homunculus.cmd
 ```
+
+VS Code integration uses the same global command plus user-level instructions
+and hooks:
+
+```powershell
+%USERPROFILE%\.copilot\instructions\codex-homunculus.instructions.md
+%USERPROFILE%\.copilot\hooks\homunculus.json
+%USERPROFILE%\.claude\CLAUDE.md
+%USERPROFILE%\.claude\rules\codex-homunculus.md
+%USERPROFILE%\.codex\bin\vscode-homunculus-hook.ps1
+```

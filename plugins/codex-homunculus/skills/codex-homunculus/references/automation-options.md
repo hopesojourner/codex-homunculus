@@ -37,8 +37,11 @@ On Windows, install the bundled wrappers from `scripts/` into a stable directory
 
 - `codex-homunculus.cmd`: runs the Homunculus CLI from the installed plugin copy.
 - `codex-with-homunculus.cmd`: runs `start` and `apply`, launches `codex`, then validates Homunculus state after Codex exits.
+- `vscode-homunculus-hook.ps1`: runs Homunculus from VS Code agent hooks for `SessionStart`, `UserPromptSubmit`, and `Stop`.
 
 Use `codex-with-homunculus.cmd --dry-run` to verify the wrapper without launching an interactive Codex session.
+
+For VS Code, install user-level files under `~/.copilot/instructions`, `~/.copilot/hooks`, `~/.claude/CLAUDE.md`, and `~/.claude/rules`. Enable `chat.useAgentsMdFile`, `chat.useClaudeMdFile`, `chat.includeApplyingInstructions`, and `chat.hookFilesLocations` in VS Code user settings.
 
 ## Recommended Boundary
 
