@@ -9,7 +9,12 @@ import process from "node:process";
 const VERSION = "0.5.0";
 const INSTRUCTION_BLOCK_START = "<!-- codex-homunculus:start -->";
 const INSTRUCTION_BLOCK_END = "<!-- codex-homunculus:end -->";
+const GITIGNORE_BLOCK_START = "# codex-homunculus:state-start";
+const GITIGNORE_BLOCK_END = "# codex-homunculus:state-end";
 const REQUIRED_INSTINCT_FIELDS = ["id", "title", "domain", "trigger", "action", "confidence", "source", "created_at", "updated_at"];
+const DEFAULT_HOMUNCULUS_FOLDER = "homunculus";
+const PRIVATE_STATE_PATHS = ["identity.json", "observations.jsonl", "instincts", "evolved", "exports"];
+const GITIGNORE_STATE_PATTERNS = ["/identity.json", "/observations.jsonl", "/instincts/", "/evolved/", "/exports/"];
 const SENSITIVE_PATTERNS = [
   ["private key block", /-----BEGIN [A-Z ]*PRIVATE KEY-----/i],
   ["GitHub token", /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/],
@@ -132,7 +137,25 @@ function stateRoot(options) {
   if (process.env.CODEX_HOMUNCULUS_DIR) {
     return resolve(process.env.CODEX_HOMUNCULUS_DIR);
   }
-  return join(projectInfo(process.cwd()).root, ".codex", "homunculus");
+  return homunculusStorageRoot();
+}
+
+function runGitRaw(args, cwd, input = undefined) {
+  return spawnSync("git", args, { cwd, input, encoding: "utf8", windowsHide: true });
+}
+
+function codexHome() {
+  return resolve(process.env.CODEX_HOME || join(homedir(), ".codex"));
+}
+
+function homunculusStorageRoot() {
+  if (process.env.CODEX_HOMUNCULUS_HOME) {
+    return resolve(process.env.CODEX_HOMUNCULUS_HOME);
+  }
+  if (process.env.CODEX_HOMUNCULUS_REPO) {
+    return resolve(process.env.CODEX_HOMUNCULUS_REPO);
+  }
+  return join(codexHome(), DEFAULT_HOMUNCULUS_FOLDER);
 }
 
 function defaultCodexInstructionTarget(options) {
@@ -143,7 +166,7 @@ function defaultCodexInstructionTarget(options) {
     const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
     return join(codexHome, "AGENTS.md");
   }
-  return join(projectInfo(process.cwd()).root, "AGENTS.md");
+  return join(homunculusStorageRoot(), "AGENTS.md");
 }
 
 function isWithin(path, parent) {
@@ -181,6 +204,24 @@ function upsertInstructionBlock(existing, block) {
   return `${existing.replace(/\s+$/u, "")}\n\n${block}\n`;
 }
 
+function stateGitignoreBlock() {
+  return `${GITIGNORE_BLOCK_START}\n${GITIGNORE_STATE_PATTERNS.join("\n")}\n${GITIGNORE_BLOCK_END}`;
+}
+
+function upsertGitignoreBlock(existing) {
+  const block = stateGitignoreBlock();
+  if (!existing.trim()) {
+    return `${block}\n`;
+  }
+  const start = existing.indexOf(GITIGNORE_BLOCK_START);
+  const end = existing.indexOf(GITIGNORE_BLOCK_END);
+  if (start !== -1 && end !== -1 && end > start) {
+    const afterEnd = end + GITIGNORE_BLOCK_END.length;
+    return `${existing.slice(0, start)}${block}${existing.slice(afterEnd)}`.replace(/\s+$/u, "\n");
+  }
+  return `${existing.replace(/\s+$/u, "")}\n\n${block}\n`;
+}
+
 function dirs(root) {
   return {
     root,
@@ -191,7 +232,8 @@ function dirs(root) {
     evolvedSkills: join(root, "evolved", "skills"),
     exports: join(root, "exports"),
     identity: join(root, "identity.json"),
-    observations: join(root, "observations.jsonl")
+    observations: join(root, "observations.jsonl"),
+    gitignore: join(root, ".gitignore")
   };
 }
 
@@ -222,6 +264,15 @@ function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
+function ensureStateGitignore(root) {
+  const path = join(root, ".gitignore");
+  const existing = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const next = upsertGitignoreBlock(existing);
+  if (next !== existing) {
+    writeFileSync(path, next, "utf8");
+  }
+}
+
 function parseBoundedNumber(value, fallback, label, { min = -Infinity, max = Infinity, integer = false } = {}) {
   const raw = value === undefined || value === null || value === "" ? fallback : value;
   const parsed = Number(raw);
@@ -242,14 +293,20 @@ function ensureState(root) {
   for (const path of [d.root, d.personal, d.inherited, d.evolvedSkills, d.exports]) {
     ensureDir(path);
   }
+  ensureStateGitignore(root);
   const project = projectInfo(process.cwd());
+  const stateRepository = projectInfo(root);
+  const timestamp = now();
   let identity;
   try {
     identity = readJson(d.identity, {
       version: VERSION,
-      created_at: now(),
-      updated_at: now(),
+      created_at: timestamp,
+      updated_at: timestamp,
       project,
+      active_project: project,
+      state_repository: stateRepository,
+      projects: {},
       session_count: 0,
       evolution: {
         ready: []
@@ -260,9 +317,12 @@ function ensureState(root) {
   }
   identity ||= {
     version: VERSION,
-    created_at: now(),
-    updated_at: now(),
+    created_at: timestamp,
+    updated_at: timestamp,
     project,
+    active_project: project,
+    state_repository: stateRepository,
+    projects: {},
     session_count: 0,
     evolution: {
       ready: []
@@ -272,8 +332,18 @@ function ensureState(root) {
     die(`identity must be a JSON object: ${d.identity}`);
   }
   identity.version = VERSION;
-  identity.updated_at = now();
+  identity.updated_at = timestamp;
   identity.project = project;
+  identity.active_project = project;
+  identity.state_repository = stateRepository;
+  identity.projects = isRecord(identity.projects) ? identity.projects : {};
+  const existingProject = isRecord(identity.projects[project.id]) ? identity.projects[project.id] : {};
+  identity.projects[project.id] = {
+    ...existingProject,
+    ...project,
+    first_seen_at: existingProject.first_seen_at || timestamp,
+    last_seen_at: timestamp
+  };
   identity.evolution = identity.evolution || { ready: [] };
   writeJson(d.identity, identity);
   if (!existsSync(d.observations)) {
@@ -443,8 +513,18 @@ function commandInit(root, options) {
 
 function commandStart(root, options) {
   const state = ensureState(root);
+  const timestamp = now();
+  const project = state.identity.active_project;
+  const existingProject = isRecord(state.identity.projects?.[project.id]) ? state.identity.projects[project.id] : {};
   state.identity.session_count = Number(state.identity.session_count || 0) + 1;
-  state.identity.updated_at = now();
+  state.identity.updated_at = timestamp;
+  state.identity.projects[project.id] = {
+    ...existingProject,
+    ...project,
+    first_seen_at: existingProject.first_seen_at || timestamp,
+    last_seen_at: timestamp,
+    session_count: Number(existingProject.session_count || 0) + 1
+  };
   writeJson(state.dirs.identity, state.identity);
   const summary = summaryFor(root, state.identity);
   if (options.json) {
@@ -461,10 +541,13 @@ function commandStart(root, options) {
 function summaryFor(root, identity = null) {
   const d = dirs(root);
   const loadedIdentity = identity || readJson(d.identity, {});
+  const activeProject = loadedIdentity.active_project || loadedIdentity.project || projectInfo(process.cwd());
   const instincts = loadInstincts(root);
   return {
     root,
-    project: loadedIdentity.project || projectInfo(process.cwd()),
+    project: activeProject,
+    state_repository: loadedIdentity.state_repository || projectInfo(root),
+    projects: loadedIdentity.projects || {},
     session_count: loadedIdentity.session_count || 0,
     observations: countLines(d.observations),
     instincts: {
@@ -486,6 +569,7 @@ function commandStatus(root, options) {
   }
   console.log(`root: ${summary.root}`);
   console.log(`project: ${summary.project.name}`);
+  console.log(`state folder: ${summary.state_repository.root}`);
   console.log(`sessions: ${summary.session_count}`);
   console.log(`observations: ${summary.observations}`);
   console.log(`instincts: ${summary.instincts.total}`);
@@ -503,7 +587,8 @@ function commandObserve(root, options) {
     kind: String(options.kind || "note"),
     domain: String(options.domain || "general"),
     text: String(options.text),
-    project_id: state.identity.project.id
+    project_id: state.identity.active_project.id,
+    project: state.identity.active_project
   };
   appendFileSync(state.dirs.observations, `${JSON.stringify(record)}\n`, "utf8");
   console.log(`observation recorded: ${record.domain}/${record.kind}`);
@@ -524,6 +609,7 @@ function commandAddInstinct(root, options) {
   const title = String(options.name || options.title || options.trigger).slice(0, 90);
   const file = join(targetDir, `${slug(title)}-${id}.md`);
   const confidence = parseBoundedNumber(options.confidence, 0.5, "confidence", { min: 0, max: 1 });
+  const project = state.identity.active_project;
   const fields = {
     id,
     title,
@@ -532,6 +618,11 @@ function commandAddInstinct(root, options) {
     action: String(options.action),
     confidence,
     source: String(options.source || "manual"),
+    project_id: project.id,
+    project_name: project.name,
+    project_root: project.root,
+    project_remote: project.remote,
+    project_branch: project.branch,
     created_at: now(),
     updated_at: now()
   };
@@ -553,7 +644,8 @@ function commandLearn(root, options) {
     kind: "learning",
     domain: String(options.domain || "general"),
     text: String(options.evidence || `${options.trigger} -> ${options.action}`),
-    project_id: state.identity.project.id
+    project_id: state.identity.active_project.id,
+    project: state.identity.active_project
   };
   appendFileSync(state.dirs.observations, `${JSON.stringify(record)}\n`, "utf8");
   commandAddInstinct(root, { ...options, source: options.source || "learn" });
@@ -718,12 +810,12 @@ function commandInstallCodexInstructions(root, options) {
   }
 
   const target = defaultCodexInstructionTarget(options);
-  const projectRoot = projectInfo(process.cwd()).root;
+  const allowedRoot = homunculusStorageRoot();
   if (options.global && !options.yes) {
     die("--global writes to CODEX_HOME or ~/.codex. Rerun with --yes after explicit approval.");
   }
-  if (!isWithin(target, projectRoot) && !options.yes) {
-    die(`target is outside the current project root: ${target}. Rerun with --yes after explicit approval.`);
+  if (!isWithin(target, allowedRoot) && !options.yes) {
+    die(`target is outside the local Homunculus folder: ${target}. Rerun with --yes after explicit approval.`);
   }
 
   ensureDir(dirname(target));
@@ -747,6 +839,30 @@ function parseJsonl(path, errors) {
       errors.push(`${path}:${index + 1}: invalid JSONL record (${error.message})`);
     }
   });
+}
+
+function gitRelativePath(gitRoot, path) {
+  const rel = relative(gitRoot, path).replace(/\\/g, "/");
+  return rel || ".";
+}
+
+function gitPrivacyCheck(root) {
+  const gitRoot = runGit(["rev-parse", "--show-toplevel"], root);
+  if (!gitRoot) {
+    return null;
+  }
+  const privatePaths = PRIVATE_STATE_PATHS.map((item) => gitRelativePath(gitRoot, join(root, item)));
+  const trackedOutput = runGit(["ls-files", "--", ...privatePaths], gitRoot);
+  const tracked = trackedOutput ? trackedOutput.split(/\r?\n/).filter(Boolean) : [];
+  const ignoredResult = runGitRaw(["check-ignore", "--stdin"], gitRoot, `${privatePaths.join("\n")}\n`);
+  const ignored = new Set((ignoredResult.stdout || "").split(/\r?\n/).filter(Boolean));
+  const notIgnored = privatePaths.filter((item) => !ignored.has(item));
+  return {
+    gitRoot,
+    privatePaths,
+    tracked,
+    notIgnored
+  };
 }
 
 function validateState(root, options) {
@@ -804,10 +920,19 @@ function validateState(root, options) {
       warnings.push(`${item.path}: possible sensitive material (${[...new Set(sensitive)].join(", ")})`);
     }
   }
+  const privacy = gitPrivacyCheck(root);
+  if (privacy) {
+    if (privacy.tracked.length > 0) {
+      errors.push(`private Homunculus state is tracked by git and must be removed from the index: ${privacy.tracked.join(", ")}`);
+    }
+    if (privacy.notIgnored.length > 0) {
+      errors.push(`private Homunculus state is not protected by gitignore: ${privacy.notIgnored.join(", ")}`);
+    }
+  }
   if (options.strict) {
     errors.push(...warnings);
   }
-  return { ok: errors.length === 0, errors, warnings };
+  return { ok: errors.length === 0, errors, warnings, privacy };
 }
 
 function commandValidate(root, options) {
@@ -834,21 +959,34 @@ function commandValidate(root, options) {
 
 function commandDoctor(root, options) {
   const state = ensureState(root);
+  const privacy = gitPrivacyCheck(root);
   const checks = [
     ["root", state.dirs.root],
     ["personal instincts", state.dirs.personal],
     ["inherited instincts", state.dirs.inherited],
     ["evolved skills", state.dirs.evolvedSkills],
     ["identity", state.dirs.identity],
-    ["observations", state.dirs.observations]
+    ["observations", state.dirs.observations],
+    ["gitignore", state.dirs.gitignore]
   ].map(([name, path]) => ({ name, path, exists: existsSync(path), type: existsSync(path) ? (statSync(path).isDirectory() ? "dir" : "file") : "missing" }));
-  const ok = checks.every((check) => check.exists);
+  const privacyOk = !privacy || (privacy.tracked.length === 0 && privacy.notIgnored.length === 0);
+  const ok = checks.every((check) => check.exists) && privacyOk;
   if (options.json) {
-    printJson({ ok, checks });
+    printJson({ ok, checks, privacy });
     return;
   }
   for (const check of checks) {
     console.log(`${check.exists ? "ok" : "missing"} ${check.name}: ${check.path}`);
+  }
+  if (privacy) {
+    console.log(`${privacy.tracked.length === 0 ? "ok" : "error"} private state untracked by git`);
+    console.log(`${privacy.notIgnored.length === 0 ? "ok" : "error"} private state ignored by git`);
+    if (privacy.tracked.length > 0) {
+      console.log(`tracked private state: ${privacy.tracked.join(", ")}`);
+    }
+    if (privacy.notIgnored.length > 0) {
+      console.log(`not ignored private state: ${privacy.notIgnored.join(", ")}`);
+    }
   }
   if (!ok) {
     process.exitCode = 1;
@@ -879,14 +1017,21 @@ Commands:
   validate             Validate state files, JSONL, and instinct metadata.
 
 Common options:
-  --root <path>        Override state root.
+  --root <path>        Override state root. Defaults to CODEX_HOME/homunculus or ~/.codex/homunculus.
   --json               Print machine-readable JSON where supported.
   --allow-sensitive    Permit persistence of sensitive-looking text.
+
+Environment:
+  CODEX_HOMUNCULUS_HOME
+                       Pin the local Homunculus folder used for default state and AGENTS.md writes.
+  CODEX_HOMUNCULUS_DIR Pin the exact state directory, overriding CODEX_HOMUNCULUS_HOME.
+  CODEX_HOMUNCULUS_REPO
+                       Backward-compatible alias for CODEX_HOMUNCULUS_HOME.
 
 install-codex-instructions options:
   --target <path>      Write to a specific AGENTS.md-style file.
   --global             Target CODEX_HOME/AGENTS.md or ~/.codex/AGENTS.md.
-  --yes                Confirm writes outside the current project root.
+  --yes                Confirm writes outside the local Homunculus folder.
   --print              Print the instruction block without writing.
   --script-command <command>
                        Command to embed in the instruction block.

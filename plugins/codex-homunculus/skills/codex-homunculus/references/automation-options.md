@@ -4,7 +4,7 @@ Codex Homunculus can make memory use more consistent, but it must not pretend Co
 
 ## Instruction Automatic
 
-Use `install-codex-instructions` to add or update a marked AGENTS.md block. This is the closest practical option for repo work because Codex reads repo instructions before handling tasks.
+Use `install-codex-instructions` to add or update the marked AGENTS.md block in the local Homunculus folder by default. This keeps Homunculus writes out of OneDrive and caller repos while still documenting the bootstrap workflow.
 
 Safe default:
 
@@ -12,7 +12,7 @@ Safe default:
 node plugins\codex-homunculus\scripts\homunculus.mjs install-codex-instructions
 ```
 
-Out-of-repo or global writes require explicit confirmation:
+Any target outside the local Homunculus folder, or any global write, requires explicit confirmation:
 
 ```powershell
 node plugins\codex-homunculus\scripts\homunculus.mjs install-codex-instructions --target C:\path\to\AGENTS.md --yes
@@ -47,7 +47,7 @@ For VS Code, install user-level files under `~/.copilot/instructions`, `~/.copil
 
 Prefer this order:
 
-1. Install repo-local AGENTS.md bootstrap instructions.
+1. Keep Homunculus state and default AGENTS.md writes anchored to the local Homunculus folder.
 2. Keep the skill trigger broad enough for memory and automation requests.
 3. Use scheduled automations only for explicit periodic jobs.
 4. Use wrappers only after the user accepts the local operational risks.

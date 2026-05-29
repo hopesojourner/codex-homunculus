@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -8,6 +8,10 @@ import { fileURLToPath } from "node:url";
 const root = mkdtempSync(join(tmpdir(), "codex-homunculus-test-"));
 const script = fileURLToPath(new URL("./homunculus.mjs", import.meta.url));
 const commandWrapper = fileURLToPath(new URL("./codex-homunculus.cmd", import.meta.url));
+const defaultHomunculusFolder = join(root, "local-homunculus-folder");
+const callerRepo = join(root, "caller-repo");
+mkdirSync(defaultHomunculusFolder, { recursive: true });
+mkdirSync(callerRepo, { recursive: true });
 
 function run(args) {
   const result = runRaw(args);
@@ -26,7 +30,98 @@ function runRaw(args) {
   });
 }
 
+function runDefaultRaw(args) {
+  const env = { ...process.env, CODEX_HOMUNCULUS_HOME: defaultHomunculusFolder };
+  delete env.CODEX_HOMUNCULUS_DIR;
+  delete env.CODEX_HOMUNCULUS_REPO;
+  return spawnSync(process.execPath, [script, ...args], {
+    cwd: callerRepo,
+    encoding: "utf8",
+    env,
+    windowsHide: true
+  });
+}
+
+function runGitIn(cwd, args) {
+  return spawnSync("git", args, {
+    cwd,
+    encoding: "utf8",
+    windowsHide: true
+  });
+}
+
 try {
+  const defaultStart = runDefaultRaw(["start", "--json"]);
+  if (defaultStart.status !== 0) {
+    console.error(defaultStart.stdout);
+    console.error(defaultStart.stderr);
+    throw new Error("default start failed");
+  }
+  const defaultSummary = JSON.parse(defaultStart.stdout);
+  const expectedDefaultRoot = defaultHomunculusFolder;
+  if (defaultSummary.root !== expectedDefaultRoot) {
+    throw new Error(`default state root was ${defaultSummary.root}, expected ${expectedDefaultRoot}`);
+  }
+  if (defaultSummary.project.name !== "caller-repo" || defaultSummary.project.root !== callerRepo) {
+    throw new Error("default start did not preserve the caller repo as active project context");
+  }
+  const defaultIdentity = JSON.parse(readFileSync(join(expectedDefaultRoot, "identity.json"), "utf8"));
+  if (defaultIdentity.state_repository.root !== defaultHomunculusFolder) {
+    throw new Error("default state repository metadata did not point at the local Homunculus folder");
+  }
+  if (defaultIdentity.active_project.root !== callerRepo) {
+    throw new Error("default identity did not record the caller repo as active_project");
+  }
+  if (!defaultIdentity.projects?.[defaultIdentity.active_project.id]?.last_seen_at) {
+    throw new Error("default identity did not retain per-project history");
+  }
+  if (existsSync(join(callerRepo, ".codex"))) {
+    throw new Error("default start wrote state into the caller repo");
+  }
+  const defaultInstall = runDefaultRaw(["install-codex-instructions"]);
+  if (defaultInstall.status !== 0) {
+    console.error(defaultInstall.stdout);
+    console.error(defaultInstall.stderr);
+    throw new Error("default instruction install failed");
+  }
+  if (!existsSync(join(defaultHomunculusFolder, "AGENTS.md"))) {
+    throw new Error("default instruction install did not target the local Homunculus folder");
+  }
+  if (existsSync(join(callerRepo, "AGENTS.md"))) {
+    throw new Error("default instruction install wrote into the caller repo");
+  }
+  const gitInit = runGitIn(defaultHomunculusFolder, ["init"]);
+  if (gitInit.status !== 0) {
+    console.error(gitInit.stdout);
+    console.error(gitInit.stderr);
+    throw new Error("git init failed in the local Homunculus folder");
+  }
+  const guardedValidate = runDefaultRaw(["validate", "--json"]);
+  if (guardedValidate.status !== 0) {
+    console.error(guardedValidate.stdout);
+    console.error(guardedValidate.stderr);
+    throw new Error("validate failed with protected untracked state");
+  }
+  const guardedResult = JSON.parse(guardedValidate.stdout);
+  if (!guardedResult.privacy || guardedResult.privacy.tracked.length !== 0 || guardedResult.privacy.notIgnored.length !== 0) {
+    throw new Error("validate did not confirm git privacy guards");
+  }
+  const forcedAdd = runGitIn(defaultHomunculusFolder, ["add", "-f", "identity.json"]);
+  if (forcedAdd.status !== 0) {
+    console.error(forcedAdd.stdout);
+    console.error(forcedAdd.stderr);
+    throw new Error("forced add of private state failed in smoke test setup");
+  }
+  const blockedValidate = runDefaultRaw(["validate", "--json"]);
+  if (blockedValidate.status === 0) {
+    throw new Error("validate did not fail when private state was tracked");
+  }
+  const unstagePrivateState = runGitIn(defaultHomunculusFolder, ["rm", "--cached", "--", "identity.json"]);
+  if (unstagePrivateState.status !== 0) {
+    console.error(unstagePrivateState.stdout);
+    console.error(unstagePrivateState.stderr);
+    throw new Error("failed to unstage private state after privacy test");
+  }
   run(["init"]);
   run([
     "add-instinct",
@@ -50,6 +145,9 @@ try {
   const exported = JSON.parse(readFileSync(exportPath, "utf8"));
   if (!Array.isArray(exported.instincts) || exported.instincts.length !== 1) {
     throw new Error("export did not include exactly one instinct");
+  }
+  if (!exported.instincts[0].metadata.project_id || !exported.instincts[0].metadata.project_root) {
+    throw new Error("exported instinct did not retain source project metadata");
   }
   run([
     "add-instinct",
@@ -81,6 +179,15 @@ try {
     "--evidence",
     "smoke test learning"
   ]);
+  const observations = readFileSync(join(root, "observations.jsonl"), "utf8")
+    .trim()
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((line) => JSON.parse(line));
+  const learning = observations.find((record) => record.kind === "learning");
+  if (!learning?.project?.root || learning.project_id !== learning.project.id) {
+    throw new Error("learning observation did not retain detailed source project metadata");
+  }
   const instructionPrint = run(["install-codex-instructions", "--print"]);
   if (!instructionPrint.includes("codex-homunculus:start") || !instructionPrint.includes("Homunculus Bootstrap")) {
     throw new Error("install-codex-instructions --print did not emit the expected block");
@@ -94,7 +201,7 @@ try {
     throw new Error("install-codex-instructions did not idempotently write AGENTS.md");
   }
   const outsideRefused = runRaw(["install-codex-instructions", "--target", join(tmpdir(), "codex-homunculus-outside.md")]);
-  if (outsideRefused.status === 0 || !outsideRefused.stderr.includes("outside the current project root")) {
+  if (outsideRefused.status === 0 || !outsideRefused.stderr.includes("outside the local Homunculus folder")) {
     throw new Error("outside target write was not refused without --yes");
   }
   const globalRefused = runRaw(["install-codex-instructions", "--global"]);

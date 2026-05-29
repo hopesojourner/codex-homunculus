@@ -4,3 +4,11 @@ node_modules/
 .codex/homunculus/
 npm-debug.log*
 *.log
+
+# codex-homunculus:state-start
+/identity.json
+/observations.jsonl
+/instincts/
+/evolved/
+/exports/
+# codex-homunculus:state-end

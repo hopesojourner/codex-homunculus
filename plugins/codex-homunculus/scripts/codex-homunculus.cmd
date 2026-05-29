@@ -16,4 +16,12 @@ if not exist "%PLUGIN_ROOT%\scripts\homunculus.mjs" (
   exit /b 1
 )
 
+if not defined CODEX_HOME (
+  set "CODEX_HOME=%USERPROFILE%\.codex"
+)
+
+if not defined CODEX_HOMUNCULUS_HOME (
+  set "CODEX_HOMUNCULUS_HOME=%CODEX_HOME%\homunculus"
+)
+
 node "%PLUGIN_ROOT%\scripts\homunculus.mjs" %*
