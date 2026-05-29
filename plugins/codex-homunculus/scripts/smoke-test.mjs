@@ -30,16 +30,25 @@ function runRaw(args) {
   });
 }
 
-function runDefaultRaw(args) {
-  const env = { ...process.env, CODEX_HOMUNCULUS_HOME: defaultHomunculusFolder };
+function homunculusEnv(overrides) {
+  const env = { ...process.env };
+  delete env.CODEX_HOMUNCULUS_HOME;
   delete env.CODEX_HOMUNCULUS_DIR;
   delete env.CODEX_HOMUNCULUS_REPO;
+  return { ...env, ...overrides };
+}
+
+function runWithHomunculusEnv(args, overrides, cwd = callerRepo) {
   return spawnSync(process.execPath, [script, ...args], {
-    cwd: callerRepo,
+    cwd,
     encoding: "utf8",
-    env,
+    env: homunculusEnv(overrides),
     windowsHide: true
   });
+}
+
+function runDefaultRaw(args) {
+  return runWithHomunculusEnv(args, { CODEX_HOMUNCULUS_HOME: defaultHomunculusFolder });
 }
 
 function runGitIn(cwd, args) {
@@ -89,6 +98,40 @@ try {
   }
   if (existsSync(join(callerRepo, "AGENTS.md"))) {
     throw new Error("default instruction install wrote into the caller repo");
+  }
+  const stateParentRepo = join(root, "state-parent-repo");
+  const explicitStateRoot = join(stateParentRepo, "custom-state");
+  mkdirSync(stateParentRepo, { recursive: true });
+  const explicitGitInit = runGitIn(stateParentRepo, ["init"]);
+  if (explicitGitInit.status !== 0) {
+    console.error(explicitGitInit.stdout);
+    console.error(explicitGitInit.stderr);
+    throw new Error("git init failed for explicit state parent repo");
+  }
+  const explicitStart = runWithHomunculusEnv(["start", "--json"], { CODEX_HOMUNCULUS_DIR: explicitStateRoot });
+  if (explicitStart.status !== 0) {
+    console.error(explicitStart.stdout);
+    console.error(explicitStart.stderr);
+    throw new Error("explicit CODEX_HOMUNCULUS_DIR start failed");
+  }
+  const explicitSummary = JSON.parse(explicitStart.stdout);
+  if (explicitSummary.root !== explicitStateRoot) {
+    throw new Error(`explicit state root was ${explicitSummary.root}, expected ${explicitStateRoot}`);
+  }
+  if (explicitSummary.state_repository.root !== explicitStateRoot) {
+    throw new Error("state_repository metadata did not preserve the explicit state directory");
+  }
+  const explicitInstall = runWithHomunculusEnv(["install-codex-instructions"], { CODEX_HOMUNCULUS_DIR: explicitStateRoot });
+  if (explicitInstall.status !== 0) {
+    console.error(explicitInstall.stdout);
+    console.error(explicitInstall.stderr);
+    throw new Error("explicit state instruction install failed");
+  }
+  if (!existsSync(join(explicitStateRoot, "AGENTS.md"))) {
+    throw new Error("explicit state instruction install did not target the explicit state directory");
+  }
+  if (existsSync(join(stateParentRepo, "AGENTS.md"))) {
+    throw new Error("explicit state instruction install wrote to the parent repo root");
   }
   const gitInit = runGitIn(defaultHomunculusFolder, ["init"]);
   if (gitInit.status !== 0) {

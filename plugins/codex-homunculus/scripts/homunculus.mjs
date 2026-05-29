@@ -130,6 +130,24 @@ function projectInfo(cwd) {
   };
 }
 
+function normalizedPath(path) {
+  return resolve(path).replace(/\\/g, "/").toLowerCase();
+}
+
+function stateRepositoryInfo(root) {
+  const resolvedRoot = resolve(root);
+  const gitInfo = projectInfo(resolvedRoot);
+  if (normalizedPath(gitInfo.root) === normalizedPath(resolvedRoot)) {
+    return { ...gitInfo, root: resolvedRoot };
+  }
+  return {
+    ...gitInfo,
+    id: sha(`${gitInfo.remote || gitInfo.root}:${resolvedRoot}`).slice(0, 16),
+    name: basename(resolvedRoot),
+    root: resolvedRoot
+  };
+}
+
 function stateRoot(options) {
   if (options.root) {
     return resolve(String(options.root));
@@ -158,7 +176,7 @@ function homunculusStorageRoot() {
   return join(codexHome(), DEFAULT_HOMUNCULUS_FOLDER);
 }
 
-function defaultCodexInstructionTarget(options) {
+function defaultCodexInstructionTarget(root, options) {
   if (options.target) {
     return resolve(String(options.target));
   }
@@ -166,7 +184,7 @@ function defaultCodexInstructionTarget(options) {
     const codexHome = process.env.CODEX_HOME || join(homedir(), ".codex");
     return join(codexHome, "AGENTS.md");
   }
-  return join(homunculusStorageRoot(), "AGENTS.md");
+  return join(root, "AGENTS.md");
 }
 
 function isWithin(path, parent) {
@@ -295,7 +313,7 @@ function ensureState(root) {
   }
   ensureStateGitignore(root);
   const project = projectInfo(process.cwd());
-  const stateRepository = projectInfo(root);
+  const stateRepository = stateRepositoryInfo(root);
   const timestamp = now();
   let identity;
   try {
@@ -546,7 +564,7 @@ function summaryFor(root, identity = null) {
   return {
     root,
     project: activeProject,
-    state_repository: loadedIdentity.state_repository || projectInfo(root),
+    state_repository: loadedIdentity.state_repository || stateRepositoryInfo(root),
     projects: loadedIdentity.projects || {},
     session_count: loadedIdentity.session_count || 0,
     observations: countLines(d.observations),
@@ -809,8 +827,8 @@ function commandInstallCodexInstructions(root, options) {
     return;
   }
 
-  const target = defaultCodexInstructionTarget(options);
-  const allowedRoot = homunculusStorageRoot();
+  const target = defaultCodexInstructionTarget(root, options);
+  const allowedRoot = root;
   if (options.global && !options.yes) {
     die("--global writes to CODEX_HOME or ~/.codex. Rerun with --yes after explicit approval.");
   }
