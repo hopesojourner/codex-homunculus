@@ -11,4 +11,5 @@ npm-debug.log*
 /instincts/
 /evolved/
 /exports/
+/.lock/
 # codex-homunculus:state-end
