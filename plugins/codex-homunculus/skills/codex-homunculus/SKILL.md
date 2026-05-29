@@ -5,12 +5,15 @@ description: Local-first Homunculus-style memory for Codex. Use when the user as
 
 # Codex Homunculus
 
-Use this skill to manage project-local learned instincts for Codex. For exact file schemas, read `references/state-format.md` only when editing state files, debugging imports, or building tooling around the state format.
+Use this skill to manage local Homunculus-folder learned instincts for Codex. For exact file schemas, read `references/state-format.md` only when editing state files, debugging imports, or building tooling around the state format.
 For automation tradeoffs, repo/global instruction bootstrapping, scheduled jobs, or wrappers, read `references/automation-options.md`.
 
 ## Core model
 
-- Store state in `.codex/homunculus` by default, inside the current git root when one exists.
+- Store state in `CODEX_HOME\homunculus` or `%USERPROFILE%\.codex\homunculus` by default, not under OneDrive and not under the caller's current repo.
+- Use `CODEX_HOMUNCULUS_HOME` to pin the local Homunculus folder, or `CODEX_HOMUNCULUS_DIR` / `--root` only for explicit state-directory overrides. `CODEX_HOMUNCULUS_REPO` remains a backward-compatible alias.
+- Preserve the caller repo as source metadata in `identity.json`, observations, and learned instinct frontmatter.
+- Keep runtime state private: `.gitignore`, `validate`, and the optional `scripts/pre-commit-privacy-guard` hook must prevent `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, and `exports/` from being committed.
 - Keep learned behavior as Markdown instincts under `instincts/personal` or `instincts/inherited`.
 - Keep observations as JSONL under `observations.jsonl`.
 - Use the bundled CLI at `../../scripts/homunculus.mjs` for deterministic state operations.
@@ -56,13 +59,13 @@ node <plugin-root>\scripts\homunculus.mjs evolve --min-count 3
 node <plugin-root>\scripts\homunculus.mjs validate
 ```
 
-7. To install or refresh repo-local Codex bootstrap instructions, run from the repo root:
+7. To install or refresh the local Homunculus folder Codex bootstrap instructions, run:
 
 ```powershell
 node <plugin-root>\scripts\homunculus.mjs install-codex-instructions
 ```
 
-Use `--print` to inspect the block without writing. Use `--global --yes` or an out-of-repo `--target <path> --yes` only after explicit user approval.
+Use `--print` to inspect the block without writing. The default target is the local Homunculus folder `AGENTS.md`; use `--global --yes` or an out-of-folder `--target <path> --yes` only after explicit user approval.
 
 8. For portability between repos or machines, use:
 
@@ -92,7 +95,7 @@ node <plugin-root>\scripts\homunculus.mjs import --input homunculus-export.json
 
 - Keep instincts atomic: one trigger and one action per file.
 - Treat observations as evidence, not truth. Convert them into instincts only after a repeated or explicit pattern exists.
-- Prefer project-local state. Use `--root <path>` only when the user asks for a non-default location.
+- Prefer local Homunculus-folder state. Use `--root <path>` only when the user asks for a non-default location.
 - Before persisting potentially sensitive facts, ask the user.
 - Use `--allow-sensitive` only after explicit user approval, and prefer redaction instead.
-- If automatic hook behavior is requested, use `install-codex-instructions` for repo-level bootstrap instructions and explain that every-message hooks require a future Codex hook surface or an external wrapper.
+- If automatic hook behavior is requested, use `install-codex-instructions` for Homunculus bootstrap instructions and explain that every-message hooks require a future Codex hook surface or an external wrapper.

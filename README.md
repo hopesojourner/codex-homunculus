@@ -1,7 +1,7 @@
 # Codex Homunculus
 
 Codex Homunculus is a Codex-native adaptation of Homunculus-style local memory.
-It provides a project-local plugin, a triggerable Codex skill, and a deterministic
+It provides a repository-anchored plugin, a triggerable Codex skill, and a deterministic
 Node.js CLI for learned instincts, validation, import/export, and evolution
 summaries.
 
@@ -38,7 +38,24 @@ node scripts\homunculus.mjs install-codex-instructions
 node scripts\homunculus.mjs validate
 ```
 
-State defaults to `.codex/homunculus` under the current git root.
+State defaults to the local Homunculus folder at `CODEX_HOME\homunculus`
+or `%USERPROFILE%\.codex\homunculus`, not OneDrive and not the caller's
+current git root. Set `CODEX_HOMUNCULUS_HOME` to pin that local folder
+explicitly, or use `CODEX_HOMUNCULUS_DIR` / `--root` for an explicit state
+directory. `CODEX_HOMUNCULUS_REPO` is still accepted as a backward-compatible
+alias for `CODEX_HOMUNCULUS_HOME`.
+
+When invoked from another repository, Homunculus still records that caller as
+the active project. `identity.json`, observations, and learned instinct
+metadata retain source repository details, while the files remain under the
+local Homunculus folder.
+
+The local Homunculus folder is safe to initialize as a normal Git working tree.
+The CLI maintains a `.gitignore` block for runtime state, and `validate` fails
+if `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, or
+`exports/` are tracked. Install `scripts/pre-commit-privacy-guard` as
+`.git/hooks/pre-commit` in that local working tree for an extra commit-time
+block.
 
 ## Codex Automation Boundary
 
@@ -53,9 +70,10 @@ Refresh that block with:
 node plugins\codex-homunculus\scripts\homunculus.mjs install-codex-instructions
 ```
 
-Use `--print` to inspect the block without writing. Use `--global --yes` or an
-out-of-repo `--target <path> --yes` only after explicitly accepting the global
-or external write.
+By default, `install-codex-instructions` also targets the local Homunculus
+folder's `AGENTS.md`. Use `--print` to inspect the block without writing. Use
+`--global --yes` or an out-of-folder `--target <path> --yes` only after
+explicitly accepting the global or external write.
 
 Codex skills can trigger when the user mentions memory, instincts, learning,
 prior behavior, or Homunculus automation. Scheduled Codex automations can run
