@@ -3,12 +3,31 @@
   "version": "0.5.0",
   "private": true,
   "description": "Codex-native Homunculus-style local memory and instincts.",
+  "homepage": "https://github.com/hopesojourner/codex-homunculus#readme",
+  "bugs": {
+    "url": "https://github.com/hopesojourner/codex-homunculus/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hopesojourner/codex-homunculus.git",
+    "directory": "plugins/codex-homunculus"
+  },
+  "author": "hopesojourner",
+  "keywords": [
+    "codex",
+    "homunculus",
+    "memory",
+    "instincts",
+    "workflow",
+    "local-first"
+  ],
   "type": "module",
   "bin": {
     "codex-homunculus": "./scripts/homunculus.mjs"
   },
   "scripts": {
     "check": "node --check scripts/homunculus.mjs && node --check scripts/smoke-test.mjs",
+    "ci": "npm run check && npm test && npm run validate-state && npm pack --dry-run",
     "test": "node scripts/smoke-test.mjs",
     "doctor": "node scripts/homunculus.mjs doctor",
     "validate-state": "node scripts/homunculus.mjs validate"

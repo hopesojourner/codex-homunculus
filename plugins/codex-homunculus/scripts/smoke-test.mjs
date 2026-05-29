@@ -183,6 +183,14 @@ try {
   if (!applyOut.includes("inspect files")) {
     throw new Error("apply did not return the saved instinct");
   }
+  const irrelevantApplyOut = run(["apply", "--context", "frontend css styling"]);
+  if (!irrelevantApplyOut.includes("no matching instincts") || irrelevantApplyOut.includes("inspect files")) {
+    throw new Error("apply returned an instinct with no context or domain match");
+  }
+  const domainApplyOut = run(["apply", "--domain", "repo-debugging", "--context", "frontend css styling"]);
+  if (!domainApplyOut.includes("inspect files")) {
+    throw new Error("apply did not return the saved instinct for an exact domain match");
+  }
   const exportPath = join(root, "bundle.json");
   run(["export", "--output", exportPath]);
   const exported = JSON.parse(readFileSync(exportPath, "utf8"));
@@ -232,7 +240,7 @@ try {
     throw new Error("learning observation did not retain detailed source project metadata");
   }
   const instructionPrint = run(["install-codex-instructions", "--print"]);
-  if (!instructionPrint.includes("codex-homunculus:start") || !instructionPrint.includes("Homunculus Bootstrap")) {
+  if (!instructionPrint.includes("codex-homunculus:start") || !instructionPrint.includes("Homunculus Bootstrap") || !instructionPrint.includes(script)) {
     throw new Error("install-codex-instructions --print did not emit the expected block");
   }
   const agentsPath = join(root, "AGENTS.md");
@@ -259,6 +267,22 @@ try {
   if (invalidLimit.status === 0 || !invalidLimit.stderr.includes("limit must be a finite number")) {
     throw new Error("invalid limit was not refused");
   }
+  const missingRootValue = spawnSync(process.execPath, [script, "init", "--root"], {
+    cwd: root,
+    encoding: "utf8",
+    windowsHide: true
+  });
+  if (missingRootValue.status === 0 || !missingRootValue.stderr.includes("root requires a value") || existsSync(join(root, "true"))) {
+    throw new Error("missing root value was not refused cleanly");
+  }
+  const missingOutputValue = runRaw(["export", "--output"]);
+  if (missingOutputValue.status === 0 || !missingOutputValue.stderr.includes("output requires a value")) {
+    throw new Error("missing output value was not refused cleanly");
+  }
+  const missingContextValue = runRaw(["apply", "--context"]);
+  if (missingContextValue.status === 0 || !missingContextValue.stderr.includes("context requires a value")) {
+    throw new Error("missing context value was not refused cleanly");
+  }
   const invalidMinCount = runRaw(["evolve", "--min-count", "0"]);
   if (invalidMinCount.status === 0 || !invalidMinCount.stderr.includes("min-count must be between")) {
     throw new Error("invalid min-count was not refused");
@@ -268,6 +292,18 @@ try {
   const invalidImport = runRaw(["import", "--input", invalidImportPath]);
   if (invalidImport.status === 0 || !invalidImport.stderr.includes("import input is not valid JSON")) {
     throw new Error("invalid import JSON was not refused cleanly");
+  }
+  const malformedImportPath = join(root, "malformed-import.json");
+  writeFileSync(malformedImportPath, JSON.stringify({ instincts: [null] }), "utf8");
+  const malformedImport = runRaw(["import", "--input", malformedImportPath]);
+  if (malformedImport.status === 0 || !malformedImport.stderr.includes("imported instinct 1 must be an object")) {
+    throw new Error("malformed import item was not refused cleanly");
+  }
+  const missingMarkdownImportPath = join(root, "missing-markdown-import.json");
+  writeFileSync(missingMarkdownImportPath, JSON.stringify({ instincts: [{ filename: "bad.md", metadata: null, markdown: null }] }), "utf8");
+  const missingMarkdownImport = runRaw(["import", "--input", missingMarkdownImportPath]);
+  if (missingMarkdownImport.status === 0 || !missingMarkdownImport.stderr.includes("markdown must be a non-empty string")) {
+    throw new Error("missing markdown import was not refused cleanly");
   }
   const badIdentityRoot = mkdtempSync(join(tmpdir(), "codex-homunculus-bad-identity-"));
   writeFileSync(join(badIdentityRoot, "identity.json"), "[]", "utf8");

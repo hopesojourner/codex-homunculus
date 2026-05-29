@@ -17,6 +17,7 @@ For automation tradeoffs, repo/global instruction bootstrapping, scheduled jobs,
 - Keep learned behavior as Markdown instincts under `instincts/personal` or `instincts/inherited`.
 - Keep observations as JSONL under `observations.jsonl`.
 - Use the bundled CLI at `../../scripts/homunculus.mjs` for deterministic state operations.
+- On Windows, prefer the bundled PowerShell wrappers `scripts/codex-homunculus.ps1` and `scripts/codex-with-homunculus.ps1` when running manually.
 - Refuse to store secrets, tokens, private keys, customer data, or credentials as instincts. The CLI blocks common secret patterns unless `--allow-sensitive` is explicitly used after user approval.
 
 This is a Codex-native adaptation. Codex plugins do not currently provide the same Claude Code hook/slash-command runtime, so use explicit skill invocation and CLI calls instead of claiming automatic background observation.
@@ -26,52 +27,54 @@ This is a Codex-native adaptation. Codex plugins do not currently provide the sa
 1. At the start of a repo task, run:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs start
+<plugin-root>\scripts\codex-homunculus.ps1 start
 ```
+
+Use `node <plugin-root>\scripts\homunculus.mjs ...` or `./scripts/homunculus.mjs ...` on POSIX when a PowerShell wrapper is not available.
 
 2. Before style-sensitive, workflow-sensitive, or repeated decisions, apply relevant instincts:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs apply --context "<brief task context>"
+<plugin-root>\scripts\codex-homunculus.ps1 apply --context "<brief task context>"
 ```
 
 3. When the user corrects Codex or states a durable preference, save a narrow instinct:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs add-instinct --domain repo-debugging --trigger "user asks for repo debugging" --action "inspect files and run verification before claiming success" --confidence 0.85 --evidence "User explicitly requested evidence-first repo debugging."
+<plugin-root>\scripts\codex-homunculus.ps1 add-instinct --domain repo-debugging --trigger "user asks for repo debugging" --action "inspect files and run verification before claiming success" --confidence 0.85 --evidence "User explicitly requested evidence-first repo debugging."
 ```
 
 4. When you need to record both evidence and an instinct in one step, use `learn`:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs learn --domain repo-debugging --trigger "user corrects a shortcut" --action "save the durable preference after checking for secrets" --confidence 0.8 --evidence "User corrected the workflow."
+<plugin-root>\scripts\codex-homunculus.ps1 learn --domain repo-debugging --trigger "user corrects a shortcut" --action "save the durable preference after checking for secrets" --confidence 0.8 --evidence "User corrected the workflow."
 ```
 
 5. When related instincts accumulate, evolve them into a reusable summary:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs evolve --min-count 3
+<plugin-root>\scripts\codex-homunculus.ps1 evolve --min-count 3
 ```
 
 6. Validate state before sharing, installing globally, or relying on inherited instincts:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs validate
+<plugin-root>\scripts\codex-homunculus.ps1 validate
 ```
 
 7. To install or refresh the local Homunculus folder Codex bootstrap instructions, run:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs install-codex-instructions
+<plugin-root>\scripts\codex-homunculus.ps1 install-codex-instructions
 ```
 
-Use `--print` to inspect the block without writing. The default target is the local Homunculus folder `AGENTS.md`; use `--global --yes` or an out-of-folder `--target <path> --yes` only after explicit user approval.
+Use `--print` to inspect the block without writing. The default target is the local Homunculus folder `AGENTS.md`, and the generated block embeds the installed CLI script path instead of assuming a caller repo layout. Use `--script-command` for a custom wrapper, and use `--global --yes` or an out-of-folder `--target <path> --yes` only after explicit user approval.
 
 8. For portability between repos or machines, use:
 
 ```powershell
-node <plugin-root>\scripts\homunculus.mjs export --output homunculus-export.json
-node <plugin-root>\scripts\homunculus.mjs import --input homunculus-export.json
+<plugin-root>\scripts\codex-homunculus.ps1 export --output homunculus-export.json
+<plugin-root>\scripts\codex-homunculus.ps1 import --input homunculus-export.json
 ```
 
 ## Command guide

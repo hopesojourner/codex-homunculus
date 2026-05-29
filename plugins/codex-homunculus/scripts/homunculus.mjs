@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSy
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const VERSION = "0.5.0";
 const INSTRUCTION_BLOCK_START = "<!-- codex-homunculus:start -->";
@@ -15,6 +16,28 @@ const REQUIRED_INSTINCT_FIELDS = ["id", "title", "domain", "trigger", "action", 
 const DEFAULT_HOMUNCULUS_FOLDER = "homunculus";
 const PRIVATE_STATE_PATHS = ["identity.json", "observations.jsonl", "instincts", "evolved", "exports"];
 const GITIGNORE_STATE_PATTERNS = ["/identity.json", "/observations.jsonl", "/instincts/", "/evolved/", "/exports/"];
+const VALUE_OPTIONS = new Set([
+  "root",
+  "text",
+  "kind",
+  "domain",
+  "trigger",
+  "action",
+  "evidence",
+  "scope",
+  "name",
+  "title",
+  "confidence",
+  "source",
+  "context",
+  "limit",
+  "min-count",
+  "minCount",
+  "output",
+  "input",
+  "target",
+  "script-command"
+]);
 const SENSITIVE_PATTERNS = [
   ["private key block", /-----BEGIN [A-Z ]*PRIVATE KEY-----/i],
   ["GitHub token", /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/],
@@ -93,12 +116,20 @@ function parseArgs(argv) {
     }
     const eq = item.indexOf("=");
     if (eq !== -1) {
-      args[item.slice(2, eq)] = item.slice(eq + 1);
+      const key = item.slice(2, eq);
+      const value = item.slice(eq + 1);
+      if (VALUE_OPTIONS.has(key) && value === "") {
+        die(`${key} requires a value`);
+      }
+      args[key] = value;
       continue;
     }
     const key = item.slice(2);
     const next = argv[i + 1];
     if (next === undefined || next.startsWith("--")) {
+      if (VALUE_OPTIONS.has(key)) {
+        die(`${key} requires a value`);
+      }
       args[key] = true;
     } else {
       args[key] = next;
@@ -192,8 +223,12 @@ function isWithin(path, parent) {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
+function defaultScriptCommand() {
+  return `node ${JSON.stringify(fileURLToPath(import.meta.url))}`;
+}
+
 function codexInstructionBlock(options = {}) {
-  const command = String(options["script-command"] || "node plugins/codex-homunculus/scripts/homunculus.mjs");
+  const command = String(options["script-command"] || defaultScriptCommand());
   return `${INSTRUCTION_BLOCK_START}
 ## Codex Homunculus Bootstrap
 
@@ -202,9 +237,10 @@ For repo tasks in this workspace:
 1. Before planning or editing, run \`${command} start\`.
 2. Apply relevant learned instincts with \`${command} apply --context "<short task summary>"\`.
 3. Use only relevant instincts; treat them as guidance, not proof.
-4. Before the final response, if the task produced a durable workflow lesson or the user corrected Codex behavior, ask before storing it, then run \`${command} learn --domain "<domain>" --trigger "<specific trigger>" --action "<specific action>" --evidence "<brief evidence>"\`.
-5. Do not store secrets, credentials, private customer data, or tokens. Prefer redaction.
-6. Do not claim every-turn hooks, background observation, or scheduled behavior unless a separate wrapper or automation has been explicitly installed and verified.
+4. If this block was copied between machines or plugin locations, refresh it with \`install-codex-instructions\` or pass \`--script-command\` so the command path points at the installed CLI.
+5. Before the final response, if the task produced a durable workflow lesson or the user corrected Codex behavior, ask before storing it, then run \`${command} learn --domain "<domain>" --trigger "<specific trigger>" --action "<specific action>" --evidence "<brief evidence>"\`.
+6. Do not store secrets, credentials, private customer data, or tokens. Prefer redaction.
+7. Do not claim every-turn hooks, background observation, or scheduled behavior unless a separate wrapper or automation has been explicitly installed and verified.
 
 ${INSTRUCTION_BLOCK_END}`;
 }
@@ -278,6 +314,26 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function validateImportItem(item, index) {
+  const label = `imported instinct ${index + 1}`;
+  if (!isRecord(item)) {
+    die(`${label} must be an object`);
+  }
+  if (typeof item.markdown !== "string" || item.markdown.trim() === "") {
+    die(`${label} markdown must be a non-empty string`);
+  }
+  const meta = parseFrontmatter(item.markdown);
+  for (const field of REQUIRED_INSTINCT_FIELDS) {
+    if (["id", "source", "updated_at"].includes(field)) {
+      continue;
+    }
+    if (meta[field] === undefined || meta[field] === "") {
+      die(`${label} markdown is missing frontmatter field ${field}`);
+    }
+  }
+  parseBoundedNumber(meta.confidence, undefined, `${label} confidence`, { min: 0, max: 1 });
+}
+
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
@@ -293,6 +349,9 @@ function ensureStateGitignore(root) {
 
 function parseBoundedNumber(value, fallback, label, { min = -Infinity, max = Infinity, integer = false } = {}) {
   const raw = value === undefined || value === null || value === "" ? fallback : value;
+  if (raw === true) {
+    die(`${label} requires a value`);
+  }
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
     die(`${label} must be a finite number`);
@@ -496,15 +555,21 @@ function scoreInstinct(instinct, context, domain) {
   const meta = instinct.meta;
   const haystack = tokenize(`${meta.title || ""} ${meta.trigger || ""} ${meta.action || ""} ${meta.domain || ""}`);
   const query = tokenize(`${context || ""} ${domain || ""}`);
-  let score = Number(meta.confidence ?? 0.5);
-  if (domain && String(meta.domain || "").toLowerCase() === String(domain).toLowerCase()) {
-    score += 3;
-  }
+  const exactDomainMatch = Boolean(domain && String(meta.domain || "").toLowerCase() === String(domain).toLowerCase());
+  let tokenMatches = 0;
   for (const token of query) {
     if (haystack.has(token)) {
-      score += 1;
+      tokenMatches += 1;
     }
   }
+  if (!exactDomainMatch && tokenMatches === 0) {
+    return 0;
+  }
+  let score = Number(meta.confidence ?? 0.5);
+  if (exactDomainMatch) {
+    score += 3;
+  }
+  score += tokenMatches;
   return score;
 }
 
@@ -805,7 +870,8 @@ function commandImport(root, options) {
   const scope = options.scope === "personal" ? "personal" : "inherited";
   const targetDir = scope === "personal" ? state.dirs.personal : state.dirs.inherited;
   let imported = 0;
-  for (const item of bundle.instincts) {
+  for (const [index, item] of bundle.instincts.entries()) {
+    validateImportItem(item, index);
     const original = item.filename || `${slug(item.metadata?.title || "instinct")}.md`;
     assertSafeToPersist([item.markdown], options, `imported instinct ${original}`);
     const target = uniquePath(join(targetDir, `${slug(original.replace(/\.md$/i, ""))}-imported.md`));

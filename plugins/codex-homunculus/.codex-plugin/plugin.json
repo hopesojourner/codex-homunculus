@@ -3,11 +3,11 @@
   "version": "0.5.0",
   "description": "Local-first Homunculus-style memory, instinct validation, and evolution for Codex.",
   "author": {
-    "name": "Local developer",
-    "url": "https://github.com/humanplane/homunculus"
+    "name": "hopesojourner",
+    "url": "https://github.com/hopesojourner/codex-homunculus"
   },
-  "homepage": "https://github.com/humanplane/homunculus",
-  "repository": "https://github.com/humanplane/homunculus",
+  "homepage": "https://github.com/hopesojourner/codex-homunculus",
+  "repository": "https://github.com/hopesojourner/codex-homunculus",
   "license": "MIT",
   "keywords": [
     "codex",
@@ -21,8 +21,8 @@
   "interface": {
     "displayName": "Codex Homunculus",
     "shortDescription": "Validated local instinct memory for Codex",
-    "longDescription": "Codex Homunculus adapts Homunculus-style session memory into a Codex-native plugin with project-local state, Markdown instincts, sensitive-data guardrails, import/export, validation, deterministic evolution summaries, opt-in AGENTS.md bootstrap instructions, Windows wrapper scripts, and VS Code user-level hook support. It does not depend on Claude Code hooks.",
-    "developerName": "Local developer",
+    "longDescription": "Codex Homunculus adapts Homunculus-style session memory into a Codex-native plugin with project-local state, Markdown instincts, sensitive-data guardrails, import/export, validation, deterministic evolution summaries, opt-in AGENTS.md bootstrap instructions, PowerShell and Command Prompt Windows wrapper scripts, POSIX entry points, and VS Code user-level hook support. It does not depend on Claude Code hooks.",
+    "developerName": "hopesojourner",
     "category": "Coding",
     "capabilities": [
       "Interactive",

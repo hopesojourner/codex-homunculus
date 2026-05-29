@@ -9,14 +9,18 @@ Use `install-codex-instructions` to add or update the marked AGENTS.md block in 
 Safe default:
 
 ```powershell
-node plugins\codex-homunculus\scripts\homunculus.mjs install-codex-instructions
+.\plugins\codex-homunculus\scripts\codex-homunculus.ps1 install-codex-instructions
 ```
+
+On POSIX, use `./plugins/codex-homunculus/scripts/homunculus.mjs install-codex-instructions`.
+The generated block embeds the installed CLI script path by default; use
+`--script-command` to embed a PATH-based wrapper or other custom launcher.
 
 Any target outside the local Homunculus folder, or any global write, requires explicit confirmation:
 
 ```powershell
-node plugins\codex-homunculus\scripts\homunculus.mjs install-codex-instructions --target C:\path\to\AGENTS.md --yes
-node plugins\codex-homunculus\scripts\homunculus.mjs install-codex-instructions --global --yes
+.\plugins\codex-homunculus\scripts\codex-homunculus.ps1 install-codex-instructions --target C:\path\to\AGENTS.md --yes
+.\plugins\codex-homunculus\scripts\codex-homunculus.ps1 install-codex-instructions --global --yes
 ```
 
 Use `--print` before global writes when the user wants to inspect the exact text.
@@ -35,11 +39,13 @@ A wrapper script can launch Codex, run Homunculus before and after sessions, and
 
 On Windows, install the bundled wrappers from `scripts/` into a stable directory such as `%USERPROFILE%\.codex\bin`:
 
-- `codex-homunculus.cmd`: runs the Homunculus CLI from the installed plugin copy.
-- `codex-with-homunculus.cmd`: runs `start` and `apply`, launches `codex`, then validates Homunculus state after Codex exits.
+- `codex-homunculus.ps1`: PowerShell-first Homunculus CLI wrapper.
+- `codex-with-homunculus.ps1`: PowerShell-first wrapper that runs `start` and `apply`, launches `codex`, then validates Homunculus state after Codex exits.
+- `codex-homunculus.cmd`: Command Prompt Homunculus CLI wrapper.
+- `codex-with-homunculus.cmd`: Command Prompt wrapper for the same wrapped session flow.
 - `vscode-homunculus-hook.ps1`: runs Homunculus from VS Code agent hooks for `SessionStart`, `UserPromptSubmit`, and `Stop`.
 
-Use `codex-with-homunculus.cmd --dry-run` to verify the wrapper without launching an interactive Codex session.
+Use `codex-with-homunculus.ps1 --dry-run` to verify the PowerShell wrapper without launching an interactive Codex session.
 
 For VS Code, install user-level files under `~/.copilot/instructions`, `~/.copilot/hooks`, `~/.claude/CLAUDE.md`, and `~/.claude/rules`. Enable `chat.useAgentsMdFile`, `chat.useClaudeMdFile`, `chat.includeApplyingInstructions`, and `chat.hookFilesLocations` in VS Code user settings.
 
