@@ -1,0 +1,11 @@
+#!/bin/sh
+set -eu
+
+blocked="$(git diff --cached --name-only -- identity.json observations.jsonl instincts evolved exports || true)"
+
+if [ -n "$blocked" ]; then
+  echo "error: refusing to commit private Homunculus runtime state:" >&2
+  echo "$blocked" >&2
+  echo "Remove these paths from the index, for example: git rm --cached -- <path>" >&2
+  exit 1
+fi

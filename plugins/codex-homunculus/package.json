@@ -1,18 +1,44 @@
 {
   "name": "codex-homunculus",
   "version": "0.5.0",
-  "private": true,
   "description": "Codex-native Homunculus-style local memory and instincts.",
   "type": "module",
   "bin": {
-    "codex-homunculus": "./scripts/homunculus.mjs"
+    "codex-homunculus": "./scripts/homunculus.mjs",
+    "codex-homunculus-helper": "./scripts/homunculus-helper.mjs"
   },
+  "files": [
+    ".codex-plugin/",
+    "configs/",
+    "docs/",
+    "production/",
+    "scripts/",
+    "skills/",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "check": "node --check scripts/homunculus.mjs && node --check scripts/smoke-test.mjs",
     "test": "node scripts/smoke-test.mjs",
     "doctor": "node scripts/homunculus.mjs doctor",
-    "validate-state": "node scripts/homunculus.mjs validate"
+    "helper:health": "node scripts/homunculus-helper.mjs health",
+    "helper:maintenance": "node scripts/homunculus-helper.mjs maintenance",
+    "validate-state": "node scripts/homunculus.mjs validate",
+    "pack:verify": "npm pack --dry-run"
   },
+  "keywords": [
+    "codex",
+    "homunculus",
+    "memory",
+    "skills",
+    "instincts"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/humanplane/homunculus"
+  },
+  "homepage": "https://github.com/humanplane/homunculus",
   "engines": {
     "node": ">=20"
   },
