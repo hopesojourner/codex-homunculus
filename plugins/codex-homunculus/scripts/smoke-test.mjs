@@ -1,16 +1,19 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = mkdtempSync(join(tmpdir(), "codex-homunculus-test-"));
 const script = fileURLToPath(new URL("./homunculus.mjs", import.meta.url));
 const helper = fileURLToPath(new URL("./homunculus-helper.mjs", import.meta.url));
+const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
+const pluginPackage = JSON.parse(readFileSync(join(pluginRoot, "package.json"), "utf8"));
 const productionInstaller = fileURLToPath(new URL("./install-production.ps1", import.meta.url));
 const productionManifest = fileURLToPath(new URL("../production/helper-app.json", import.meta.url));
 const commandWrapper = fileURLToPath(new URL("./codex-homunculus.cmd", import.meta.url));
+const vscodeHook = fileURLToPath(new URL("./vscode-homunculus-hook.ps1", import.meta.url));
 const defaultHomunculusFolder = join(root, "local-homunculus-folder");
 const callerRepo = join(root, "caller-repo");
 mkdirSync(defaultHomunculusFolder, { recursive: true });
@@ -88,6 +91,10 @@ function runProcess(command, args, options = {}) {
       resolvePromise({ status, stdout, stderr });
     });
   });
+}
+
+function normalizePathSeparators(path) {
+  return String(path).replace(/\\/g, "/");
 }
 
 try {
@@ -181,6 +188,11 @@ try {
   if (!guardedResult.privacy || guardedResult.privacy.tracked.length !== 0 || guardedResult.privacy.notIgnored.length !== 0) {
     throw new Error("validate did not confirm git privacy guards");
   }
+  for (const expectedPrivatePath of ["quarantine", "archive", ".lock"]) {
+    if (!guardedResult.privacy.privatePaths.includes(expectedPrivatePath)) {
+      throw new Error(`validate privacy guard did not include ${expectedPrivatePath}`);
+    }
+  }
   const forcedAdd = runGitIn(defaultHomunculusFolder, ["add", "-f", "identity.json"]);
   if (forcedAdd.status !== 0) {
     console.error(forcedAdd.stdout);
@@ -245,6 +257,24 @@ try {
   }
   if (!exported.instincts[0].metadata.project_id || !exported.instincts[0].metadata.project_root) {
     throw new Error("exported instinct did not retain source project metadata");
+  }
+  run([
+    "add-instinct",
+    "--domain",
+    "path-lookup",
+    "--trigger",
+    "state relative instinct path",
+    "--action",
+    "resolve --path relative to the Homunculus state root",
+    "--confidence",
+    "0.8",
+    "--evidence",
+    "smoke test state-relative path lookup"
+  ]);
+  const pathInstinct = JSON.parse(run(["list", "--json", "--domain", "path-lookup"]))[0];
+  const quarantineByRelativePath = run(["quarantine", "--path", relative(root, pathInstinct.path)]);
+  if (!quarantineByRelativePath.includes("instinct quarantined")) {
+    throw new Error("quarantine --path did not accept a state-root-relative path");
   }
   run([
     "add-instinct",
@@ -385,6 +415,31 @@ try {
     if (wrapperHelp.status !== 0 || !wrapperHelp.stdout.includes("Codex Homunculus")) {
       throw new Error("Windows codex-homunculus wrapper did not run the CLI");
     }
+    const fakeUserProfile = join(root, "userprofile");
+    const fakeBin = join(fakeUserProfile, ".codex", "bin");
+    mkdirSync(fakeBin, { recursive: true });
+    copyFileSync(commandWrapper, join(fakeBin, "codex-homunculus.cmd"));
+    const hookInput = JSON.stringify({ hookEventName: "SessionStart", cwd: callerRepo });
+    const hookResult = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", vscodeHook], {
+      input: hookInput,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        USERPROFILE: fakeUserProfile,
+        CODEX_HOME: join(fakeUserProfile, ".codex"),
+        CODEX_HOMUNCULUS_PLUGIN_ROOT: pluginRoot
+      },
+      windowsHide: true
+    });
+    if (hookResult.status !== 0) {
+      console.error(hookResult.stdout);
+      console.error(hookResult.stderr);
+      throw new Error("VS Code Homunculus hook did not run");
+    }
+    const hookJson = JSON.parse(hookResult.stdout);
+    if (!hookJson.continue || hookJson.hookSpecificOutput?.hookEventName !== "SessionStart" || !hookJson.hookSpecificOutput?.additionalContext) {
+      throw new Error("VS Code Homunculus hook did not parse stdin JSON and emit SessionStart context");
+    }
   }
   const helperHelp = runHelperRaw(["--help"]);
   if (helperHelp.status !== 0 || !helperHelp.stdout.includes("Codex Homunculus Helper")) {
@@ -410,6 +465,11 @@ try {
   if (helperManifest.maintenance?.autoRegisterOnInstall !== true || helperManifest.maintenance?.optOutFlag !== "-NoMaintenanceTask") {
     throw new Error("production helper manifest does not declare install-time maintenance scheduling");
   }
+  for (const expectedPrivatePath of ["quarantine", "archive", ".lock"]) {
+    if (!helperManifest.state.privatePaths.includes(expectedPrivatePath)) {
+      throw new Error(`production helper manifest does not declare ${expectedPrivatePath} as private state`);
+    }
+  }
   const globalDoctor = JSON.parse(run(["doctor", "--global", "--json"]));
   if (!globalDoctor.inventory?.source_plugin?.path || !globalDoctor.inventory?.state_root?.path) {
     throw new Error("doctor --global JSON did not include install inventory");
@@ -432,8 +492,36 @@ try {
     "scripts/uninstall-production.ps1",
     "skills/codex-homunculus/agents/openai.yaml"
   ]) {
-    if (!syncDryRun.files.some((file) => file.from.endsWith(requiredPath.replaceAll("/", "\\")))) {
+    if (!syncDryRun.files.some((file) => normalizePathSeparators(file.from).endsWith(requiredPath))) {
       throw new Error(`sync-installed did not include ${requiredPath}`);
+    }
+  }
+  const freshCodexHome = join(root, "fresh-codex-home");
+  const freshStateRoot = join(freshCodexHome, "homunculus");
+  const freshSync = spawnSync(process.execPath, [script, "sync-installed", "--yes", "--json", "--root", freshStateRoot], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CODEX_HOME: freshCodexHome,
+      CODEX_HOMUNCULUS_HOME: freshStateRoot
+    },
+    windowsHide: true
+  });
+  if (freshSync.status !== 0) {
+    console.error(freshSync.stdout);
+    console.error(freshSync.stderr);
+    throw new Error("sync-installed --yes failed for a fresh CODEX_HOME");
+  }
+  const freshSyncResult = JSON.parse(freshSync.stdout);
+  if (freshSyncResult.mode !== "write" || freshSyncResult.files.length === 0) {
+    throw new Error("sync-installed --yes did not report written files for a fresh CODEX_HOME");
+  }
+  for (const installedScriptPath of [
+    join(freshCodexHome, "local-marketplaces", "codex-homunculus", "plugins", "codex-homunculus", "scripts", "homunculus.mjs"),
+    join(freshCodexHome, "plugins", "cache", "codex-homunculus", "codex-homunculus", pluginPackage.version, "scripts", "homunculus.mjs")
+  ]) {
+    if (!existsSync(installedScriptPath)) {
+      throw new Error(`sync-installed did not populate fresh target ${installedScriptPath}`);
     }
   }
   const repairDryRun = JSON.parse(run(["repair-installed", "--dry-run", "--json"]));

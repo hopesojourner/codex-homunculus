@@ -21,10 +21,11 @@
   "scripts": {
     "check": "node --check scripts/homunculus.mjs && node --check scripts/smoke-test.mjs",
     "test": "node scripts/smoke-test.mjs",
+    "ci": "npm run check && npm test && npm run validate-state && npm run pack:verify && npm run helper:health",
     "doctor": "node scripts/homunculus.mjs doctor",
     "helper:health": "node scripts/homunculus-helper.mjs health",
     "helper:maintenance": "node scripts/homunculus-helper.mjs maintenance",
-    "validate-state": "node scripts/homunculus.mjs validate",
+    "validate-state": "node scripts/homunculus.mjs init && node scripts/homunculus.mjs validate",
     "pack:verify": "npm pack --dry-run"
   },
   "keywords": [
@@ -36,9 +37,13 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/humanplane/homunculus"
+    "url": "git+https://github.com/hopesojourner/codex-homunculus.git",
+    "directory": "plugins/codex-homunculus"
   },
-  "homepage": "https://github.com/humanplane/homunculus",
+  "homepage": "https://github.com/hopesojourner/codex-homunculus/tree/main/plugins/codex-homunculus",
+  "bugs": {
+    "url": "https://github.com/hopesojourner/codex-homunculus/issues"
+  },
   "engines": {
     "node": ">=20"
   },

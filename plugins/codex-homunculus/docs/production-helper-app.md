@@ -41,6 +41,24 @@ To remove helper scripts and the scheduled task:
 .\scripts\uninstall-production.ps1 -UnregisterMaintenanceTask
 ```
 
+On the verified Windows setup for this repo, the production files live under
+`C:\Users\Gchen\.codex\bin`, the state root is
+`C:\Users\Gchen\.codex\homunculus`, and the installed plugin copies are:
+
+```text
+C:\Users\Gchen\.codex\local-marketplaces\codex-homunculus\plugins\codex-homunculus
+C:\Users\Gchen\.codex\plugins\cache\codex-homunculus\codex-homunculus\0.5.0
+```
+
+The weekly scheduled task is named `Codex Homunculus Maintenance`.
+
+For manual privacy-hook checks on this machine, use Git for Windows `sh.exe`;
+bare `bash.exe` resolves to WSL and fails when no WSL distribution is installed:
+
+```powershell
+& "C:\Program Files\Git\bin\sh.exe" scripts\pre-commit-privacy-guard
+```
+
 ## Boundaries
 
 State defaults to `%USERPROFILE%\.codex\homunculus`. The helper does not store

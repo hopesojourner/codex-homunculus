@@ -19,8 +19,9 @@ const LOCK_FOLDER = ".lock";
 const LOCK_RETRY_MS = 25;
 const LOCK_TIMEOUT_MS = 30_000;
 const LOCK_STALE_MS = 5 * 60_000;
-const PRIVATE_STATE_PATHS = ["identity.json", "observations.jsonl", "instincts", "evolved", "exports"];
-const GITIGNORE_STATE_PATTERNS = ["/identity.json", "/observations.jsonl", "/instincts/", "/evolved/", "/exports/", `/${LOCK_FOLDER}/`];
+const PRIVATE_STATE_PATHS = ["identity.json", "observations.jsonl", "instincts", "evolved", "exports", "quarantine", "archive", LOCK_FOLDER];
+const PRIVATE_STATE_DIRECTORIES = new Set(["instincts", "evolved", "exports", "quarantine", "archive", LOCK_FOLDER]);
+const GITIGNORE_STATE_PATTERNS = ["/identity.json", "/observations.jsonl", "/instincts/", "/evolved/", "/exports/", "/quarantine/", "/archive/", `/${LOCK_FOLDER}/`];
 const INSTALL_SYNC_FILES = [
   "package.json",
   "README.md",
@@ -198,7 +199,7 @@ function defaultScriptCommand() {
   const scriptName = process.platform === "win32" ? "codex-homunculus.cmd" : "codex-homunculus";
   const localBin = join(codexHome(), "bin", scriptName);
   if (existsSync(localBin)) {
-    return localBin;
+    return process.platform === "win32" ? `& "${localBin.replace(/`/g, "``").replace(/"/g, '`"')}"` : localBin;
   }
   return "codex-homunculus";
 }
@@ -609,7 +610,8 @@ function findInstinct(root, options) {
   if (!query) {
     die("command requires --id or --path");
   }
-  const matches = loadInstincts(root).filter((item) => item.meta.id === query || item.path === resolve(query));
+  const pathMatches = new Set([resolve(query), resolve(root, query)]);
+  const matches = loadInstincts(root).filter((item) => item.meta.id === query || pathMatches.has(item.path));
   if (matches.length === 0) {
     die(`no instinct matched: ${query}`);
   }
@@ -1072,22 +1074,22 @@ function scanJsonlSensitive(path, warnings) {
   });
 }
 
-function gitRelativePath(gitRoot, path) {
-  const rel = relative(gitRoot, path).replace(/\\/g, "/");
-  return rel || ".";
-}
-
 function gitPrivacyCheck(root) {
   const gitRoot = runGit(["rev-parse", "--show-toplevel"], root);
   if (!gitRoot) {
     return null;
   }
-  const privatePaths = PRIVATE_STATE_PATHS.map((item) => gitRelativePath(gitRoot, join(root, item)));
+  const prefix = runGit(["rev-parse", "--show-prefix"], root).replace(/\\/g, "/");
+  const privatePaths = PRIVATE_STATE_PATHS.map((item) => `${prefix}${item}`.replace(/\\/g, "/"));
+  const checkIgnorePaths = PRIVATE_STATE_PATHS.map((item, index) => {
+    const privatePath = privatePaths[index];
+    return PRIVATE_STATE_DIRECTORIES.has(item) ? `${privatePath}/` : privatePath;
+  });
   const trackedOutput = runGit(["ls-files", "--", ...privatePaths], gitRoot);
   const tracked = trackedOutput ? trackedOutput.split(/\r?\n/).filter(Boolean) : [];
-  const ignoredResult = runGitRaw(["check-ignore", "--stdin"], gitRoot, `${privatePaths.join("\n")}\n`);
+  const ignoredResult = runGitRaw(["check-ignore", "--stdin"], gitRoot, `${checkIgnorePaths.join("\n")}\n`);
   const ignored = new Set((ignoredResult.stdout || "").split(/\r?\n/).filter(Boolean));
-  const notIgnored = privatePaths.filter((item) => !ignored.has(item));
+  const notIgnored = privatePaths.filter((item, index) => !ignored.has(item) && !ignored.has(checkIgnorePaths[index]));
   return {
     gitRoot,
     privatePaths,
@@ -1190,13 +1192,13 @@ function installInventory(root) {
 function syncInstalledResult(root, options) {
   const source = pluginRoot();
   const inventory = installInventory(root);
-  const targets = [inventory.local_marketplace_plugin, inventory.plugin_cache].filter((item) => item.exists);
+  const targets = [inventory.local_marketplace_plugin, inventory.plugin_cache];
   const files = [];
   for (const target of targets) {
     for (const relativePath of INSTALL_SYNC_FILES) {
       const from = join(source, relativePath);
       const to = join(target.path, relativePath);
-      files.push({ from, to, exists: existsSync(from) });
+      files.push({ from, to, exists: existsSync(from), target_exists: target.exists });
     }
   }
   const dryRun = options["dry-run"] || !options.yes;

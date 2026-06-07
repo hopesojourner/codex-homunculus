@@ -22,7 +22,10 @@ codex-homunculus install-codex-instructions --global --yes
 ```powershell
 npm run check
 npm test
-npm pack --dry-run
+npm pack --dry-run --json
+node scripts\homunculus.mjs doctor --global
+node scripts\homunculus.mjs validate --strict
+node scripts\homunculus-helper.mjs health
 ```
 
 Use `sync-installed --dry-run` before `sync-installed --yes` when updating
@@ -39,3 +42,19 @@ codex-homunculus-helper maintenance
 On Windows, `scripts\install-production.ps1` copies helper launchers into
 `%USERPROFILE%\.codex\bin` and automatically registers weekly maintenance.
 Use `-NoMaintenanceTask` only when scheduling should be skipped.
+
+On the verified `C:\Users\Gchen` Windows setup, the active wrappers are in
+`C:\Users\Gchen\.codex\bin`, state is in
+`C:\Users\Gchen\.codex\homunculus`, and installed copies are refreshed with:
+
+```powershell
+node scripts\homunculus.mjs sync-installed --dry-run
+node scripts\homunculus.mjs sync-installed --yes
+```
+
+Manual privacy-hook checks should use Git for Windows `sh.exe` on this machine
+because bare `bash.exe` resolves to WSL:
+
+```powershell
+& "C:\Program Files\Git\bin\sh.exe" scripts\pre-commit-privacy-guard
+```

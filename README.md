@@ -26,6 +26,10 @@ plugins/codex-homunculus/
 cd plugins\codex-homunculus
 npm run check
 npm test
+npm pack --dry-run --json
+node scripts\homunculus.mjs doctor --global
+node scripts\homunculus.mjs validate --strict
+node scripts\homunculus-helper.mjs health
 ```
 
 ## CLI
@@ -137,3 +141,38 @@ and hooks:
 %USERPROFILE%\.claude\rules\codex-homunculus.md
 %USERPROFILE%\.codex\bin\vscode-homunculus-hook.ps1
 ```
+
+## Verified Windows Machine State
+
+This repository is currently verified against the Windows Codex setup on
+`C:\Users\Gchen`:
+
+- Real Codex home: `C:\Users\Gchen\.codex`
+- Source plugin: `plugins\codex-homunculus`
+- Local marketplace copy:
+  `C:\Users\Gchen\.codex\local-marketplaces\codex-homunculus\plugins\codex-homunculus`
+- Plugin cache copy:
+  `C:\Users\Gchen\.codex\plugins\cache\codex-homunculus\codex-homunculus\0.5.0`
+- Wrapper scripts:
+  `C:\Users\Gchen\.codex\bin\codex-homunculus.cmd`,
+  `C:\Users\Gchen\.codex\bin\codex-homunculus-helper.cmd`,
+  `C:\Users\Gchen\.codex\bin\codex-with-homunculus.cmd`, and
+  `C:\Users\Gchen\.codex\bin\vscode-homunculus-hook.ps1`
+- Global Codex instructions: `C:\Users\Gchen\.codex\AGENTS.md`
+- Homunculus state and local instructions: `C:\Users\Gchen\.codex\homunculus`
+- Weekly maintenance task: `Codex Homunculus Maintenance`
+- Global support skill:
+  `C:\Users\Gchen\.agents\skills\skills-global-install-verification`
+
+On this machine, `bash.exe` resolves to Windows Subsystem for Linux and WSL has
+no installed distribution. Do not use bare `bash` to manually test the
+`pre-commit-privacy-guard` script here. Git for Windows can still run the hook
+normally, and a manual check can use:
+
+```powershell
+& "C:\Program Files\Git\bin\sh.exe" plugins\codex-homunculus\scripts\pre-commit-privacy-guard
+```
+
+Codex MCP servers `git` and `playwright` are intentionally disabled in the
+local config. Leave heavy MCP helpers disabled unless there is a specific task
+that requires enabling them.

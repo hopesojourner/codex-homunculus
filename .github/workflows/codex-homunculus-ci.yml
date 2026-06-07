@@ -14,7 +14,13 @@ on:
 
 jobs:
   verify:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: plugins/codex-homunculus
@@ -25,14 +31,5 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Syntax check
-        run: npm run check
-
-      - name: Smoke test
-        run: npm test
-
-      - name: Verify package
-        run: npm pack --dry-run --json
-
-      - name: Verify helper health
-        run: node scripts/homunculus-helper.mjs health
+      - name: Verify
+        run: npm run ci

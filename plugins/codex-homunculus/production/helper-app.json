@@ -15,7 +15,10 @@
       "observations.jsonl",
       "instincts",
       "evolved",
-      "exports"
+      "exports",
+      "quarantine",
+      "archive",
+      ".lock"
     ]
   },
   "healthChecks": [

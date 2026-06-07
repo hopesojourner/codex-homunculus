@@ -14,6 +14,12 @@ if /I "%~1"=="--dry-run" (
   exit /b 0
 )
 
+where codex >nul 2>nul
+if errorlevel 1 (
+  echo error: could not find codex on PATH. 1>&2
+  exit /b 1
+)
+
 call "%HOMUNCULUS%" start
 call "%HOMUNCULUS%" apply --context "Codex wrapper session in %CD%"
 
