@@ -1,13 +1,19 @@
 #!/usr/bin/env node
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { spawnSync } from "node:child_process";
+import { join, relative } from "node:path";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
 const root = mkdtempSync(join(tmpdir(), "codex-homunculus-test-"));
 const script = fileURLToPath(new URL("./homunculus.mjs", import.meta.url));
+const helper = fileURLToPath(new URL("./homunculus-helper.mjs", import.meta.url));
+const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
+const pluginPackage = JSON.parse(readFileSync(join(pluginRoot, "package.json"), "utf8"));
+const productionInstaller = fileURLToPath(new URL("./install-production.ps1", import.meta.url));
+const productionManifest = fileURLToPath(new URL("../production/helper-app.json", import.meta.url));
 const commandWrapper = fileURLToPath(new URL("./codex-homunculus.cmd", import.meta.url));
+const vscodeHook = fileURLToPath(new URL("./vscode-homunculus-hook.ps1", import.meta.url));
 const defaultHomunculusFolder = join(root, "local-homunculus-folder");
 const callerRepo = join(root, "caller-repo");
 mkdirSync(defaultHomunculusFolder, { recursive: true });
@@ -30,10 +36,27 @@ function runRaw(args) {
   });
 }
 
+function runHelperRaw(args) {
+  return spawnSync(process.execPath, [helper, ...args, "--root", root], {
+    encoding: "utf8",
+    windowsHide: true
+  });
+}
+
+function runHelper(args) {
+  const result = runHelperRaw(args);
+  if (result.status !== 0) {
+    console.error(result.stdout);
+    console.error(result.stderr);
+    throw new Error(`helper command failed: ${args.join(" ")}`);
+  }
+  return result.stdout;
+}
+
 function homunculusEnv(overrides) {
   const env = { ...process.env };
-  delete env.CODEX_HOMUNCULUS_HOME;
   delete env.CODEX_HOMUNCULUS_DIR;
+  delete env.CODEX_HOMUNCULUS_HOME;
   delete env.CODEX_HOMUNCULUS_REPO;
   return { ...env, ...overrides };
 }
@@ -57,6 +80,30 @@ function runGitIn(cwd, args) {
     encoding: "utf8",
     windowsHide: true
   });
+}
+
+function runProcess(command, args, options = {}) {
+  return new Promise((resolvePromise) => {
+    const child = spawn(command, args, { ...options, windowsHide: true });
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk;
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("error", (error) => {
+      resolvePromise({ status: 1, stdout, stderr: `${stderr}${error.message}` });
+    });
+    child.on("close", (status) => {
+      resolvePromise({ status, stdout, stderr });
+    });
+  });
+}
+
+function normalizePathSeparators(path) {
+  return String(path).replace(/\\/g, "/");
 }
 
 try {
@@ -87,6 +134,34 @@ try {
   if (existsSync(join(callerRepo, ".codex"))) {
     throw new Error("default start wrote state into the caller repo");
   }
+  const concurrentRepos = Array.from({ length: 8 }, (_, index) => {
+    const repo = join(root, `caller-repo-${index}`);
+    mkdirSync(repo, { recursive: true });
+    return repo;
+  });
+  const concurrentStarts = await Promise.all(concurrentRepos.map((cwd) =>
+    runProcess(process.execPath, [script, "start", "--json"], {
+      cwd,
+      env: { ...process.env, CODEX_HOMUNCULUS_HOME: defaultHomunculusFolder },
+    })
+  ));
+  for (const [index, result] of concurrentStarts.entries()) {
+    if (result.status !== 0) {
+      console.error(result.stdout);
+      console.error(result.stderr);
+      throw new Error(`concurrent start ${index} failed`);
+    }
+  }
+  const identityAfterConcurrentStarts = JSON.parse(readFileSync(join(expectedDefaultRoot, "identity.json"), "utf8"));
+  for (const repo of concurrentRepos) {
+    const matchingProject = Object.values(identityAfterConcurrentStarts.projects || {}).find((project) => project.root === repo);
+    if (!matchingProject) {
+      throw new Error(`concurrent start did not retain project history for ${repo}`);
+    }
+  }
+  if (existsSync(join(expectedDefaultRoot, ".lock"))) {
+    throw new Error("state lock folder was not cleaned up after concurrent starts");
+  }
   const defaultInstall = runDefaultRaw(["install-codex-instructions"]);
   if (defaultInstall.status !== 0) {
     console.error(defaultInstall.stdout);
@@ -98,6 +173,13 @@ try {
   }
   if (existsSync(join(callerRepo, "AGENTS.md"))) {
     throw new Error("default instruction install wrote into the caller repo");
+  }
+  const defaultAgentsText = readFileSync(join(defaultHomunculusFolder, "AGENTS.md"), "utf8");
+  if (defaultAgentsText.includes("node plugins/codex-homunculus/scripts/homunculus.mjs")) {
+    throw new Error("default instruction install used a repo-relative Homunculus command");
+  }
+  if (!defaultAgentsText.includes("any Codex chat or workspace") || !defaultAgentsText.includes("do not ask the user first")) {
+    throw new Error("default instruction install did not describe global no-prompt Homunculus use");
   }
   const stateParentRepo = join(root, "state-parent-repo");
   const explicitStateRoot = join(stateParentRepo, "custom-state");
@@ -149,6 +231,11 @@ try {
   if (!guardedResult.privacy || guardedResult.privacy.tracked.length !== 0 || guardedResult.privacy.notIgnored.length !== 0) {
     throw new Error("validate did not confirm git privacy guards");
   }
+  for (const expectedPrivatePath of ["quarantine", "archive", ".lock"]) {
+    if (!guardedResult.privacy.privatePaths.includes(expectedPrivatePath)) {
+      throw new Error(`validate privacy guard did not include ${expectedPrivatePath}`);
+    }
+  }
   const forcedAdd = runGitIn(defaultHomunculusFolder, ["add", "-f", "identity.json"]);
   if (forcedAdd.status !== 0) {
     console.error(forcedAdd.stdout);
@@ -166,6 +253,11 @@ try {
     throw new Error("failed to unstage private state after privacy test");
   }
   run(["init"]);
+  for (const expectedDir of ["quarantine", "archive"]) {
+    if (!existsSync(join(root, expectedDir))) {
+      throw new Error(`${expectedDir} directory was not created by init`);
+    }
+  }
   run([
     "add-instinct",
     "--domain",
@@ -183,6 +275,23 @@ try {
   if (!applyOut.includes("inspect files")) {
     throw new Error("apply did not return the saved instinct");
   }
+  const firstInstinct = JSON.parse(run(["list", "--json", "--domain", "repo-debugging"]))[0];
+  const quarantineOut = run(["quarantine", "--id", firstInstinct.id]);
+  if (!quarantineOut.includes("instinct quarantined")) {
+    throw new Error("quarantine did not report success");
+  }
+  const applyAfterQuarantine = run(["apply", "--context", "repo debugging task"]);
+  if (applyAfterQuarantine.includes("inspect files")) {
+    throw new Error("quarantined instinct still appeared in apply output");
+  }
+  const forgetMissing = runRaw(["forget", "--id", "missing-id"]);
+  if (forgetMissing.status === 0 || !forgetMissing.stderr.includes("no instinct matched")) {
+    throw new Error("forget did not refuse a missing id");
+  }
+  const audit = JSON.parse(run(["audit-memory", "--json"]));
+  if (!Array.isArray(audit.duplicates) || !Array.isArray(audit.missing_metadata) || !Array.isArray(audit.sensitive)) {
+    throw new Error("audit-memory JSON did not include expected arrays");
+  }
   const exportPath = join(root, "bundle.json");
   run(["export", "--output", exportPath]);
   const exported = JSON.parse(readFileSync(exportPath, "utf8"));
@@ -191,6 +300,24 @@ try {
   }
   if (!exported.instincts[0].metadata.project_id || !exported.instincts[0].metadata.project_root) {
     throw new Error("exported instinct did not retain source project metadata");
+  }
+  run([
+    "add-instinct",
+    "--domain",
+    "path-lookup",
+    "--trigger",
+    "state relative instinct path",
+    "--action",
+    "resolve --path relative to the Homunculus state root",
+    "--confidence",
+    "0.8",
+    "--evidence",
+    "smoke test state-relative path lookup"
+  ]);
+  const pathInstinct = JSON.parse(run(["list", "--json", "--domain", "path-lookup"]))[0];
+  const quarantineByRelativePath = run(["quarantine", "--path", relative(root, pathInstinct.path)]);
+  if (!quarantineByRelativePath.includes("instinct quarantined")) {
+    throw new Error("quarantine --path did not accept a state-root-relative path");
   }
   run([
     "add-instinct",
@@ -208,6 +335,23 @@ try {
   const listed = JSON.parse(run(["list", "--json", "--domain", "low-confidence"]));
   if (listed.length !== 1 || listed[0].confidence !== 0) {
     throw new Error("zero confidence was not preserved");
+  }
+  run([
+    "add-instinct",
+    "--domain",
+    "repo-debugging",
+    "--trigger",
+    "repo debugging task",
+    "--action",
+    "inspect files and verify commands before claiming success again",
+    "--confidence",
+    "0.9",
+    "--evidence",
+    "smoke test scoring"
+  ]);
+  const scoredApply = JSON.parse(run(["apply", "--context", "repo debugging task", "--json"]));
+  if (!scoredApply[0]?.score_components?.token_overlap) {
+    throw new Error("apply JSON did not include score components");
   }
   run([
     "learn",
@@ -255,6 +399,26 @@ try {
   if (refused.status === 0 || !refused.stderr.includes("sensitive material")) {
     throw new Error("sensitive observation was not refused");
   }
+  const sensitiveRoot = mkdtempSync(join(tmpdir(), "codex-homunculus-sensitive-state-"));
+  const sensitiveEnv = { ...process.env, CODEX_HOMUNCULUS_DIR: sensitiveRoot };
+  const sensitiveInit = spawnSync(process.execPath, [script, "init"], {
+    encoding: "utf8",
+    env: sensitiveEnv,
+    windowsHide: true
+  });
+  if (sensitiveInit.status !== 0) {
+    throw new Error("sensitive validation fixture init failed");
+  }
+  writeFileSync(join(sensitiveRoot, "observations.jsonl"), `${JSON.stringify({ text: "token=super-secret-value" })}\n`, "utf8");
+  const strictSensitive = spawnSync(process.execPath, [script, "validate", "--strict"], {
+    encoding: "utf8",
+    env: sensitiveEnv,
+    windowsHide: true
+  });
+  rmSync(sensitiveRoot, { recursive: true, force: true });
+  if (strictSensitive.status === 0 || !strictSensitive.stdout.includes("possible sensitive material")) {
+    throw new Error("strict validation did not flag sensitive observations");
+  }
   const invalidLimit = runRaw(["apply", "--limit", "nope"]);
   if (invalidLimit.status === 0 || !invalidLimit.stderr.includes("limit must be a finite number")) {
     throw new Error("invalid limit was not refused");
@@ -294,6 +458,118 @@ try {
     if (wrapperHelp.status !== 0 || !wrapperHelp.stdout.includes("Codex Homunculus")) {
       throw new Error("Windows codex-homunculus wrapper did not run the CLI");
     }
+    const fakeUserProfile = join(root, "userprofile");
+    const fakeBin = join(fakeUserProfile, ".codex", "bin");
+    mkdirSync(fakeBin, { recursive: true });
+    copyFileSync(commandWrapper, join(fakeBin, "codex-homunculus.cmd"));
+    const hookInput = JSON.stringify({ hookEventName: "SessionStart", cwd: callerRepo });
+    const hookResult = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", vscodeHook], {
+      input: hookInput,
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        USERPROFILE: fakeUserProfile,
+        CODEX_HOME: join(fakeUserProfile, ".codex"),
+        CODEX_HOMUNCULUS_PLUGIN_ROOT: pluginRoot
+      },
+      windowsHide: true
+    });
+    if (hookResult.status !== 0) {
+      console.error(hookResult.stdout);
+      console.error(hookResult.stderr);
+      throw new Error("VS Code Homunculus hook did not run");
+    }
+    const hookJson = JSON.parse(hookResult.stdout);
+    if (!hookJson.continue || hookJson.hookSpecificOutput?.hookEventName !== "SessionStart" || !hookJson.hookSpecificOutput?.additionalContext) {
+      throw new Error("VS Code Homunculus hook did not parse stdin JSON and emit SessionStart context");
+    }
+  }
+  const helperHelp = runHelperRaw(["--help"]);
+  if (helperHelp.status !== 0 || !helperHelp.stdout.includes("Codex Homunculus Helper")) {
+    throw new Error("production helper help did not run");
+  }
+  const helperStart = JSON.parse(runHelper(["start", "--context", "smoke helper session", "--json"]));
+  if (!helperStart.ok || !helperStart.start?.project?.name || !helperStart.validation?.ok) {
+    throw new Error("production helper start did not return a healthy JSON summary");
+  }
+  const helperHealth = JSON.parse(runHelper(["health", "--json"]));
+  if (!helperHealth.ok || !helperHealth.doctor?.ok || !helperHealth.validation?.ok || !helperHealth.audit) {
+    throw new Error("production helper health did not include doctor, validation, and audit results");
+  }
+  const helperMaintenance = JSON.parse(runHelper(["maintenance", "--min-count", "99", "--json"]));
+  if (!helperMaintenance.ok || !helperMaintenance.validation?.ok || !helperMaintenance.evolution) {
+    throw new Error("production helper maintenance did not run validation and evolution");
+  }
+  const installerText = readFileSync(productionInstaller, "utf8");
+  if (!installerText.includes("Register-ScheduledTask") || !installerText.includes("NoMaintenanceTask") || !installerText.includes("-RunLevel Limited")) {
+    throw new Error("production installer does not auto-register maintenance with an opt-out flag");
+  }
+  const helperManifest = JSON.parse(readFileSync(productionManifest, "utf8"));
+  if (helperManifest.maintenance?.autoRegisterOnInstall !== true || helperManifest.maintenance?.optOutFlag !== "-NoMaintenanceTask") {
+    throw new Error("production helper manifest does not declare install-time maintenance scheduling");
+  }
+  for (const expectedPrivatePath of ["quarantine", "archive", ".lock"]) {
+    if (!helperManifest.state.privatePaths.includes(expectedPrivatePath)) {
+      throw new Error(`production helper manifest does not declare ${expectedPrivatePath} as private state`);
+    }
+  }
+  const globalDoctor = JSON.parse(run(["doctor", "--global", "--json"]));
+  if (!globalDoctor.inventory?.source_plugin?.path || !globalDoctor.inventory?.state_root?.path) {
+    throw new Error("doctor --global JSON did not include install inventory");
+  }
+  const syncDryRun = JSON.parse(run(["sync-installed", "--dry-run", "--json"]));
+  if (syncDryRun.mode !== "dry-run" || !Array.isArray(syncDryRun.files)) {
+    throw new Error("sync-installed --dry-run JSON did not report planned files");
+  }
+  for (const requiredPath of [
+    "package.json",
+    "README.md",
+    "LICENSE",
+    ".codex-plugin/plugin.json",
+    "configs/production.env.example",
+    "docs/production-helper-app.md",
+    "production/helper-app.json",
+    "scripts/homunculus-helper.mjs",
+    "scripts/codex-homunculus-helper.cmd",
+    "scripts/install-production.ps1",
+    "scripts/uninstall-production.ps1",
+    "skills/codex-homunculus/agents/openai.yaml"
+  ]) {
+    if (!syncDryRun.files.some((file) => normalizePathSeparators(file.from).endsWith(requiredPath))) {
+      throw new Error(`sync-installed did not include ${requiredPath}`);
+    }
+  }
+  const freshCodexHome = join(root, "fresh-codex-home");
+  const freshStateRoot = join(freshCodexHome, "homunculus");
+  const freshSync = spawnSync(process.execPath, [script, "sync-installed", "--yes", "--json", "--root", freshStateRoot], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      CODEX_HOME: freshCodexHome,
+      CODEX_HOMUNCULUS_HOME: freshStateRoot
+    },
+    windowsHide: true
+  });
+  if (freshSync.status !== 0) {
+    console.error(freshSync.stdout);
+    console.error(freshSync.stderr);
+    throw new Error("sync-installed --yes failed for a fresh CODEX_HOME");
+  }
+  const freshSyncResult = JSON.parse(freshSync.stdout);
+  if (freshSyncResult.mode !== "write" || freshSyncResult.files.length === 0) {
+    throw new Error("sync-installed --yes did not report written files for a fresh CODEX_HOME");
+  }
+  for (const installedScriptPath of [
+    join(freshCodexHome, "local-marketplaces", "codex-homunculus", "plugins", "codex-homunculus", "scripts", "homunculus.mjs"),
+    join(freshCodexHome, "plugins", "cache", "codex-homunculus", "codex-homunculus", pluginPackage.version, "scripts", "homunculus.mjs")
+  ]) {
+    if (!existsSync(installedScriptPath)) {
+      throw new Error(`sync-installed did not populate fresh target ${installedScriptPath}`);
+    }
+  }
+  const repairDryRun = JSON.parse(run(["repair-installed", "--dry-run", "--json"]));
+  if (repairDryRun.mode !== "dry-run" || repairDryRun.sync.mode !== "dry-run") {
+    throw new Error("repair-installed --dry-run did not include sync dry-run result");
   }
   run(["doctor"]);
   run(["validate"]);
