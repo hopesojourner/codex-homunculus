@@ -14,7 +14,7 @@ For automation tradeoffs, repo/global instruction bootstrapping, scheduled jobs,
 - Use `CODEX_HOMUNCULUS_HOME` to pin the local Homunculus folder, or `CODEX_HOMUNCULUS_DIR` / `--root` only for explicit state-directory overrides. `CODEX_HOMUNCULUS_REPO` remains a backward-compatible alias.
 - Preserve the caller repo as source metadata in `identity.json`, observations, and learned instinct frontmatter.
 - State writes are serialized with a local `.lock` folder and JSON files are replaced atomically so multiple Codex chats can share the same Homunculus folder.
-- Keep runtime state private: `.gitignore`, `validate`, and the optional `scripts/pre-commit-privacy-guard` hook must prevent `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, and `exports/` from being committed.
+- Keep runtime state private: `.gitignore`, `validate`, and the optional `scripts/pre-commit-privacy-guard` hook must prevent `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, `exports/`, `quarantine/`, `archive/`, and `.lock/` from being committed.
 - Keep learned behavior as Markdown instincts under `instincts/personal` or `instincts/inherited`.
 - Keep inactive learned behavior under `quarantine/` for review or `archive/` after `forget`; neither folder participates in active retrieval.
 - Keep observations as JSONL under `observations.jsonl`.

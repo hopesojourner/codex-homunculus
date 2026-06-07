@@ -11,5 +11,7 @@ npm-debug.log*
 /instincts/
 /evolved/
 /exports/
+/quarantine/
+/archive/
 /.lock/
 # codex-homunculus:state-end

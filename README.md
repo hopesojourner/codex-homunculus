@@ -88,7 +88,7 @@ local Homunculus folder.
 The local Homunculus folder is safe to initialize as a normal Git working tree.
 The CLI maintains a `.gitignore` block for runtime state, and `validate` fails
 if `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, or
-`exports/` are tracked. Install `scripts/pre-commit-privacy-guard` as
+`exports/`, `quarantine/`, `archive/`, or `.lock/` are tracked. Install `scripts/pre-commit-privacy-guard` as
 `.git/hooks/pre-commit` in that local working tree for an extra commit-time
 block.
 
