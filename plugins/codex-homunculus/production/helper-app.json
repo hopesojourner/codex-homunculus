@@ -1,0 +1,40 @@
+{
+  "name": "Codex Homunculus Helper",
+  "version": "0.5.0",
+  "entrypoints": {
+    "cli": "scripts/homunculus.mjs",
+    "helper": "scripts/homunculus-helper.mjs",
+    "windowsHelper": "scripts/codex-homunculus-helper.cmd",
+    "installer": "scripts/install-production.ps1",
+    "uninstaller": "scripts/uninstall-production.ps1"
+  },
+  "state": {
+    "defaultRoot": "%CODEX_HOME%\\homunculus",
+    "privatePaths": [
+      "identity.json",
+      "observations.jsonl",
+      "instincts",
+      "evolved",
+      "exports",
+      "quarantine",
+      "archive",
+      ".lock"
+    ]
+  },
+  "healthChecks": [
+    "doctor --global",
+    "validate",
+    "audit-memory"
+  ],
+  "maintenance": {
+    "recommendedSchedule": "weekly",
+    "command": "codex-homunculus-helper maintenance",
+    "windowsTaskName": "Codex Homunculus Maintenance",
+    "autoRegisterOnInstall": true,
+    "optOutFlag": "-NoMaintenanceTask"
+  },
+  "writeBoundaries": [
+    "state writes stay under CODEX_HOMUNCULUS_HOME or CODEX_HOME\\homunculus by default",
+    "global instructions and installed-copy sync require explicit --yes"
+  ]
+}
