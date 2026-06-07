@@ -1,9 +1,9 @@
 # Codex Homunculus
 
 Codex Homunculus is a Codex-native adaptation of Homunculus-style local memory.
-It provides a repository-anchored plugin, a triggerable Codex skill, and a deterministic
-Node.js CLI for learned instincts, validation, import/export, and evolution
-summaries.
+It provides a repository-anchored plugin, a triggerable Codex skill, and a
+deterministic Node.js CLI for learned instincts, validation, import/export, and
+evolution summaries.
 
 This port is explicit CLI and skill driven. It does not depend on Claude Code
 hooks or slash commands.
@@ -11,30 +11,53 @@ hooks or slash commands.
 ## Layout
 
 ```text
+.github/workflows/codex-homunculus-ci.yml
 .agents/plugins/marketplace.json
+CHANGELOG.md
 plugins/codex-homunculus/
   .codex-plugin/plugin.json
   package.json
   scripts/homunculus.mjs
+  scripts/codex-homunculus.ps1
+  scripts/codex-with-homunculus.ps1
   scripts/smoke-test.mjs
   skills/codex-homunculus/SKILL.md
 ```
 
 ## Verify
 
+PowerShell on Windows:
+
 ```powershell
-cd plugins\codex-homunculus
-npm run check
-npm test
-npm pack --dry-run --json
+Set-Location plugins\codex-homunculus
+npm run ci
 node scripts\homunculus.mjs doctor --global
 node scripts\homunculus.mjs validate --strict
 node scripts\homunculus-helper.mjs health
 ```
 
+POSIX shell:
+
+```sh
+cd plugins/codex-homunculus
+npm run ci
+```
+
+`npm run ci` runs syntax checks, the smoke test, state validation, and
+`npm pack --dry-run`. The GitHub Actions workflows run that check on Ubuntu and
+Windows with their configured Node.js versions.
+
 ## CLI
 
+PowerShell on Windows:
+
 ```powershell
+Set-Location plugins\codex-homunculus
+.\scripts\codex-homunculus.ps1 start
+.\scripts\codex-homunculus.ps1 apply --context "repo debugging task"
+.\scripts\codex-homunculus.ps1 learn --domain repo-debugging --trigger "user correction" --action "save a narrow instinct"
+.\scripts\codex-homunculus.ps1 install-codex-instructions
+.\scripts\codex-homunculus.ps1 validate
 node scripts\homunculus.mjs start
 node scripts\homunculus.mjs apply --context "repo debugging task"
 node scripts\homunculus.mjs learn --domain repo-debugging --trigger "user correction" --action "save a narrow instinct"
@@ -53,12 +76,23 @@ node scripts\homunculus-helper.mjs health
 node scripts\homunculus-helper.mjs maintenance
 ```
 
-State defaults to the local Homunculus folder at `CODEX_HOME\homunculus`
-or `%USERPROFILE%\.codex\homunculus`, not OneDrive and not the caller's
-current git root. Set `CODEX_HOMUNCULUS_HOME` to pin that local folder
-explicitly, or use `CODEX_HOMUNCULUS_DIR` / `--root` for an explicit state
-directory. `CODEX_HOMUNCULUS_REPO` is still accepted as a backward-compatible
-alias for `CODEX_HOMUNCULUS_HOME`.
+POSIX shell:
+
+```sh
+cd plugins/codex-homunculus
+./scripts/homunculus.mjs start
+./scripts/homunculus.mjs apply --context "repo debugging task"
+./scripts/homunculus.mjs learn --domain repo-debugging --trigger "user correction" --action "save a narrow instinct"
+./scripts/homunculus.mjs install-codex-instructions
+./scripts/homunculus.mjs validate
+```
+
+State defaults to the local Homunculus folder at `CODEX_HOME\homunculus` or
+`%USERPROFILE%\.codex\homunculus` on Windows, and `CODEX_HOME/homunculus` or
+`~/.codex/homunculus` on POSIX. State stays out of the caller's current Git
+root unless `CODEX_HOMUNCULUS_DIR` / `--root` explicitly points there.
+`CODEX_HOMUNCULUS_HOME` pins the local Homunculus folder, and
+`CODEX_HOMUNCULUS_REPO` remains a backward-compatible alias for that setting.
 
 State-changing commands serialize through a local `.lock` folder and write JSON
 with atomic replacement so multiple Codex chats can run `start`, `apply`, or
@@ -82,8 +116,8 @@ On Windows, `scripts\install-production.ps1` now registers the weekly
 
 When invoked from another repository, Homunculus still records that caller as
 the active project. `identity.json`, observations, and learned instinct
-metadata retain source repository details, while the files remain under the
-local Homunculus folder.
+metadata retain source repository details while files remain under the local
+Homunculus folder.
 
 The local Homunculus folder is safe to initialize as a normal Git working tree.
 The CLI maintains a `.gitignore` block for runtime state, and `validate` fails
@@ -104,18 +138,24 @@ bootstrap block telling Codex to run Homunculus `start` and `apply` at the
 beginning of repo tasks, then use `learn` at the end only when there is a
 durable lesson worth saving.
 
-Refresh the global block with the installed command:
+Refresh that block from PowerShell:
 
 ```powershell
-& "$env:USERPROFILE\.codex\bin\codex-homunculus.cmd" install-codex-instructions --global --yes
+.\plugins\codex-homunculus\scripts\codex-homunculus.ps1 install-codex-instructions
 ```
 
-By default, `install-codex-instructions` also targets the local Homunculus
-folder's `AGENTS.md`. The generated block tells Codex to run the local
-Homunculus bootstrap commands directly when tool permissions allow, without
-asking the user first. Use `--print` to inspect the block without writing. Use
-`--global --yes` or an out-of-folder `--target <path> --yes` only after
-explicitly accepting the global or external write.
+Or from POSIX shell:
+
+```sh
+./plugins/codex-homunculus/scripts/homunculus.mjs install-codex-instructions
+```
+
+By default, `install-codex-instructions` targets the local Homunculus folder's
+`AGENTS.md` and embeds the installed CLI script path so the block does not rely
+on the caller's repository layout. Use `--print` to inspect the block without
+writing. Use `--script-command codex-homunculus` to embed a PATH-based wrapper,
+or `--global --yes` / `--target <path> --yes` only after explicitly accepting
+the global or external write.
 
 Codex skills can trigger when the user mentions memory, instincts, learning,
 prior behavior, or Homunculus automation. Scheduled Codex automations can run
@@ -123,13 +163,21 @@ periodic jobs, but they do not hook into every message or tool call. External
 wrappers can enforce before/after commands outside Codex, but they cannot see
 internal conversation state unless Codex exposes that state.
 
-Windows wrapper scripts are included in `plugins\codex-homunculus\scripts`:
+## Windows and PowerShell
+
+PowerShell wrappers are included in `plugins\codex-homunculus\scripts`:
 
 ```powershell
-codex-homunculus.cmd --help
-codex-with-homunculus.cmd --dry-run
-codex-with-homunculus.cmd
+.\plugins\codex-homunculus\scripts\codex-homunculus.ps1 --help
+.\plugins\codex-homunculus\scripts\codex-with-homunculus.ps1 --dry-run
+.\plugins\codex-homunculus\scripts\codex-with-homunculus.ps1
 ```
+
+The `.ps1` wrappers default `CODEX_HOME` to `%USERPROFILE%\.codex`, default
+`CODEX_HOMUNCULUS_HOME` to `%USERPROFILE%\.codex\homunculus`, restore those
+temporary defaults before exit, and support `CODEX_HOMUNCULUS_PLUGIN_ROOT` when
+installed somewhere else. `.cmd` wrappers are also included for Command Prompt
+compatibility.
 
 VS Code integration uses the same global command plus user-level instructions
 and hooks:

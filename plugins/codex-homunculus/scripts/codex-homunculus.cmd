@@ -4,11 +4,11 @@ setlocal
 if defined CODEX_HOMUNCULUS_PLUGIN_ROOT (
   set "PLUGIN_ROOT=%CODEX_HOMUNCULUS_PLUGIN_ROOT%"
 ) else (
-  set "PLUGIN_ROOT=%~dp0..\local-marketplaces\codex-homunculus\plugins\codex-homunculus"
+  set "PLUGIN_ROOT=%~dp0.."
 )
 
 if not exist "%PLUGIN_ROOT%\scripts\homunculus.mjs" (
-  set "PLUGIN_ROOT=%~dp0.."
+  set "PLUGIN_ROOT=%~dp0..\local-marketplaces\codex-homunculus\plugins\codex-homunculus"
 )
 
 if not exist "%PLUGIN_ROOT%\scripts\homunculus.mjs" (

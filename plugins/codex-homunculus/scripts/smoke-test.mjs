@@ -12,6 +12,8 @@ const pluginRoot = fileURLToPath(new URL("..", import.meta.url));
 const pluginPackage = JSON.parse(readFileSync(join(pluginRoot, "package.json"), "utf8"));
 const productionInstaller = fileURLToPath(new URL("./install-production.ps1", import.meta.url));
 const productionManifest = fileURLToPath(new URL("../production/helper-app.json", import.meta.url));
+const powershellWrapper = fileURLToPath(new URL("./codex-homunculus.ps1", import.meta.url));
+const powershellCodexWrapper = fileURLToPath(new URL("./codex-with-homunculus.ps1", import.meta.url));
 const commandWrapper = fileURLToPath(new URL("./codex-homunculus.cmd", import.meta.url));
 const vscodeHook = fileURLToPath(new URL("./vscode-homunculus-hook.ps1", import.meta.url));
 const defaultHomunculusFolder = join(root, "local-homunculus-folder");
@@ -275,6 +277,14 @@ try {
   if (!applyOut.includes("inspect files")) {
     throw new Error("apply did not return the saved instinct");
   }
+  const irrelevantApplyOut = run(["apply", "--context", "frontend css styling"]);
+  if (!irrelevantApplyOut.includes("no matching instincts") || irrelevantApplyOut.includes("inspect files")) {
+    throw new Error("apply returned an unrelated instinct for a zero-overlap context");
+  }
+  const domainApplyOut = run(["apply", "--domain", "repo-debugging", "--context", "frontend css styling"]);
+  if (!domainApplyOut.includes("inspect files")) {
+    throw new Error("apply did not return a domain-filtered instinct");
+  }
   const firstInstinct = JSON.parse(run(["list", "--json", "--domain", "repo-debugging"]))[0];
   const quarantineOut = run(["quarantine", "--id", firstInstinct.id]);
   if (!quarantineOut.includes("instinct quarantined")) {
@@ -423,6 +433,14 @@ try {
   if (invalidLimit.status === 0 || !invalidLimit.stderr.includes("limit must be a finite number")) {
     throw new Error("invalid limit was not refused");
   }
+  const missingContext = runRaw(["apply", "--context"]);
+  if (missingContext.status === 0 || !missingContext.stderr.includes("context requires a value")) {
+    throw new Error("missing context value was not refused");
+  }
+  const emptyOutput = runRaw(["export", "--output="]);
+  if (emptyOutput.status === 0 || !emptyOutput.stderr.includes("output requires a value")) {
+    throw new Error("empty output value was not refused");
+  }
   const invalidMinCount = runRaw(["evolve", "--min-count", "0"]);
   if (invalidMinCount.status === 0 || !invalidMinCount.stderr.includes("min-count must be between")) {
     throw new Error("invalid min-count was not refused");
@@ -432,6 +450,12 @@ try {
   const invalidImport = runRaw(["import", "--input", invalidImportPath]);
   if (invalidImport.status === 0 || !invalidImport.stderr.includes("import input is not valid JSON")) {
     throw new Error("invalid import JSON was not refused cleanly");
+  }
+  const invalidBundlePath = join(root, "bad-bundle.json");
+  writeFileSync(invalidBundlePath, JSON.stringify({ instincts: [{ markdown: "---\ntitle: \"Bad\"\n---\n# Bad\n" }] }), "utf8");
+  const invalidBundle = runRaw(["import", "--input", invalidBundlePath]);
+  if (invalidBundle.status === 0 || !invalidBundle.stderr.includes("markdown is missing frontmatter field")) {
+    throw new Error("invalid import bundle was not refused cleanly");
   }
   const badIdentityRoot = mkdtempSync(join(tmpdir(), "codex-homunculus-bad-identity-"));
   writeFileSync(join(badIdentityRoot, "identity.json"), "[]", "utf8");
@@ -450,6 +474,24 @@ try {
     throw new Error("duplicate imports did not create unique inherited files");
   }
   if (process.platform === "win32") {
+    const powershellWrapperHelp = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", powershellWrapper, "--help"], {
+      encoding: "utf8",
+      env: { ...process.env, CODEX_HOMUNCULUS_DIR: root },
+      windowsHide: true
+    });
+    if (powershellWrapperHelp.status !== 0 || !powershellWrapperHelp.stdout.includes("Codex Homunculus")) {
+      throw new Error("Windows PowerShell codex-homunculus wrapper did not run the CLI");
+    }
+    const powershellCodexDryRun = spawnSync("powershell", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", powershellCodexWrapper, "--dry-run"], {
+      encoding: "utf8",
+      env: { ...process.env, CODEX_HOMUNCULUS_DIR: root },
+      windowsHide: true
+    });
+    if (powershellCodexDryRun.status !== 0) {
+      console.error(powershellCodexDryRun.stdout);
+      console.error(powershellCodexDryRun.stderr);
+      throw new Error("Windows PowerShell codex-with-homunculus dry-run did not complete");
+    }
     const wrapperHelp = spawnSync("cmd.exe", ["/c", commandWrapper, "--help"], {
       encoding: "utf8",
       env: { ...process.env, CODEX_HOMUNCULUS_DIR: root },
@@ -530,7 +572,9 @@ try {
     "docs/production-helper-app.md",
     "production/helper-app.json",
     "scripts/homunculus-helper.mjs",
+    "scripts/codex-homunculus.ps1",
     "scripts/codex-homunculus-helper.cmd",
+    "scripts/codex-with-homunculus.ps1",
     "scripts/install-production.ps1",
     "scripts/uninstall-production.ps1",
     "skills/codex-homunculus/agents/openai.yaml"

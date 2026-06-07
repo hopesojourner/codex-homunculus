@@ -9,8 +9,11 @@ if not exist "%HOMUNCULUS%" (
 
 if /I "%~1"=="--dry-run" (
   call "%HOMUNCULUS%" start
+  if errorlevel 1 exit /b 1
   call "%HOMUNCULUS%" apply --context "Codex wrapper dry run in %CD%"
+  if errorlevel 1 exit /b 1
   call "%HOMUNCULUS%" validate
+  if errorlevel 1 exit /b 1
   exit /b 0
 )
 
@@ -21,10 +24,19 @@ if errorlevel 1 (
 )
 
 call "%HOMUNCULUS%" start
+if errorlevel 1 exit /b %ERRORLEVEL%
 call "%HOMUNCULUS%" apply --context "Codex wrapper session in %CD%"
+if errorlevel 1 exit /b %ERRORLEVEL%
+
+where /q codex
+if errorlevel 1 (
+  echo error: 'codex' command not found on PATH. Install Codex or use codex-homunculus.cmd directly. 1>&2
+  exit /b 1
+)
 
 codex %*
 set "CODEX_EXIT=%ERRORLEVEL%"
 
 call "%HOMUNCULUS%" validate
+if errorlevel 1 exit /b %ERRORLEVEL%
 exit /b %CODEX_EXIT%

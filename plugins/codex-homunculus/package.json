@@ -1,7 +1,24 @@
 {
   "name": "codex-homunculus",
   "version": "0.5.0",
-  "description": "Codex-native Homunculus-style local memory and instincts.",
+  "description": "Local-first Homunculus-style memory, instinct validation, and evolution for Codex.",
+  "author": "hopesojourner",
+  "homepage": "https://github.com/hopesojourner/codex-homunculus/tree/main/plugins/codex-homunculus",
+  "bugs": {
+    "url": "https://github.com/hopesojourner/codex-homunculus/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hopesojourner/codex-homunculus.git",
+    "directory": "plugins/codex-homunculus"
+  },
+  "keywords": [
+    "codex",
+    "homunculus",
+    "memory",
+    "skills",
+    "instincts"
+  ],
   "type": "module",
   "bin": {
     "codex-homunculus": "./scripts/homunculus.mjs",
@@ -27,22 +44,6 @@
     "helper:maintenance": "node scripts/homunculus-helper.mjs maintenance",
     "validate-state": "node scripts/homunculus.mjs init && node scripts/homunculus.mjs validate",
     "pack:verify": "npm pack --dry-run"
-  },
-  "keywords": [
-    "codex",
-    "homunculus",
-    "memory",
-    "skills",
-    "instincts"
-  ],
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/hopesojourner/codex-homunculus.git",
-    "directory": "plugins/codex-homunculus"
-  },
-  "homepage": "https://github.com/hopesojourner/codex-homunculus/tree/main/plugins/codex-homunculus",
-  "bugs": {
-    "url": "https://github.com/hopesojourner/codex-homunculus/issues"
   },
   "engines": {
     "node": ">=20"

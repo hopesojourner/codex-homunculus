@@ -33,8 +33,10 @@ const INSTALL_SYNC_FILES = [
   "scripts/homunculus.mjs",
   "scripts/homunculus-helper.mjs",
   "scripts/smoke-test.mjs",
+  "scripts/codex-homunculus.ps1",
   "scripts/codex-homunculus.cmd",
   "scripts/codex-homunculus-helper.cmd",
+  "scripts/codex-with-homunculus.ps1",
   "scripts/codex-with-homunculus.cmd",
   "scripts/install-production.ps1",
   "scripts/uninstall-production.ps1",
@@ -45,6 +47,30 @@ const INSTALL_SYNC_FILES = [
   "skills/codex-homunculus/references/automation-options.md",
   "skills/codex-homunculus/references/state-format.md"
 ];
+const VALUE_OPTIONS = new Set([
+  "root",
+  "text",
+  "kind",
+  "domain",
+  "trigger",
+  "action",
+  "evidence",
+  "name",
+  "title",
+  "confidence",
+  "source",
+  "context",
+  "limit",
+  "min-count",
+  "minCount",
+  "output",
+  "input",
+  "scope",
+  "id",
+  "path",
+  "target",
+  "script-command"
+]);
 const SENSITIVE_PATTERNS = [
   ["private key block", /-----BEGIN [A-Z ]*PRIVATE KEY-----/i],
   ["GitHub token", /\bgh[pousr]_[A-Za-z0-9_]{20,}\b/],
@@ -130,12 +156,20 @@ function parseArgs(argv) {
     }
     const eq = item.indexOf("=");
     if (eq !== -1) {
-      args[item.slice(2, eq)] = item.slice(eq + 1);
+      const key = item.slice(2, eq);
+      const value = item.slice(eq + 1);
+      if (VALUE_OPTIONS.has(key) && value === "") {
+        die(`${key} requires a value`);
+      }
+      args[key] = value;
       continue;
     }
     const key = item.slice(2);
     const next = argv[i + 1];
     if (next === undefined || next.startsWith("--")) {
+      if (VALUE_OPTIONS.has(key)) {
+        die(`${key} requires a value`);
+      }
       args[key] = true;
     } else {
       args[key] = next;
@@ -331,6 +365,26 @@ function isRecord(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
+function validateImportItem(item, index) {
+  const label = `imported instinct ${index + 1}`;
+  if (!isRecord(item)) {
+    die(`${label} must be an object`);
+  }
+  if (typeof item.markdown !== "string" || item.markdown.trim() === "") {
+    die(`${label} markdown must be a non-empty string`);
+  }
+  const meta = parseFrontmatter(item.markdown);
+  for (const field of REQUIRED_INSTINCT_FIELDS) {
+    if (["id", "source", "updated_at"].includes(field)) {
+      continue;
+    }
+    if (meta[field] === undefined || meta[field] === "") {
+      die(`${label} markdown is missing frontmatter field ${field}`);
+    }
+  }
+  parseBoundedNumber(meta.confidence, undefined, `${label} confidence`, { min: 0, max: 1 });
+}
+
 function writeFileAtomic(path, text) {
   ensureDir(dirname(path));
   const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`);
@@ -417,6 +471,9 @@ function ensureStateGitignore(root) {
 }
 
 function parseBoundedNumber(value, fallback, label, { min = -Infinity, max = Infinity, integer = false } = {}) {
+  if (value === true) {
+    die(`${label} requires a value`);
+  }
   const raw = value === undefined || value === null || value === "" ? fallback : value;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
@@ -663,6 +720,9 @@ function scoreInstinct(instinct, context, domain, project = null) {
     if (haystack.has(token)) {
       components.token_overlap += 1;
     }
+  }
+  if (!components.domain_match && components.token_overlap === 0) {
+    return { score: 0, components };
   }
   const score = Object.values(components).reduce((sum, value) => sum + value, 0);
   return { score, components };
@@ -1022,7 +1082,8 @@ function commandImport(root, options) {
   const scope = options.scope === "personal" ? "personal" : "inherited";
   const targetDir = scope === "personal" ? state.dirs.personal : state.dirs.inherited;
   let imported = 0;
-  for (const item of bundle.instincts) {
+  for (const [index, item] of bundle.instincts.entries()) {
+    validateImportItem(item, index);
     const original = item.filename || `${slug(item.metadata?.title || "instinct")}.md`;
     assertSafeToPersist([item.markdown], options, `imported instinct ${original}`);
     const target = uniquePath(join(targetDir, `${slug(original.replace(/\.md$/i, ""))}-imported.md`));
