@@ -13,8 +13,10 @@ For automation tradeoffs, repo/global instruction bootstrapping, scheduled jobs,
 - Store state in `CODEX_HOME\homunculus` or `%USERPROFILE%\.codex\homunculus` by default, not under OneDrive and not under the caller's current repo.
 - Use `CODEX_HOMUNCULUS_HOME` to pin the local Homunculus folder, or `CODEX_HOMUNCULUS_DIR` / `--root` only for explicit state-directory overrides. `CODEX_HOMUNCULUS_REPO` remains a backward-compatible alias.
 - Preserve the caller repo as source metadata in `identity.json`, observations, and learned instinct frontmatter.
-- Keep runtime state private: `.gitignore`, `validate`, and the optional `scripts/pre-commit-privacy-guard` hook must prevent `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, and `exports/` from being committed.
+- State writes are serialized with a local `.lock` folder and JSON files are replaced atomically so multiple Codex chats can share the same Homunculus folder.
+- Keep runtime state private: `.gitignore`, `validate`, and the optional `scripts/pre-commit-privacy-guard` hook must prevent `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, `exports/`, `quarantine/`, `archive/`, and `.lock/` from being committed.
 - Keep learned behavior as Markdown instincts under `instincts/personal` or `instincts/inherited`.
+- Keep inactive learned behavior under `quarantine/` for review or `archive/` after `forget`; neither folder participates in active retrieval.
 - Keep observations as JSONL under `observations.jsonl`.
 - Use the bundled CLI at `../../scripts/homunculus.mjs` for deterministic state operations.
 - On Windows, prefer the bundled PowerShell wrappers `scripts/codex-homunculus.ps1` and `scripts/codex-with-homunculus.ps1` when running manually.
@@ -68,7 +70,7 @@ Use `node <plugin-root>\scripts\homunculus.mjs ...` or `./scripts/homunculus.mjs
 <plugin-root>\scripts\codex-homunculus.ps1 install-codex-instructions
 ```
 
-Use `--print` to inspect the block without writing. The default target is the local Homunculus folder `AGENTS.md`, and the generated block embeds the installed CLI script path instead of assuming a caller repo layout. Use `--script-command` for a custom wrapper, and use `--global --yes` or an out-of-folder `--target <path> --yes` only after explicit user approval.
+Use `--print` to inspect the block without writing. The default target is the local Homunculus folder `AGENTS.md`, and the generated block embeds the installed CLI script path when available instead of assuming a caller repo layout. Use `--script-command` for a custom wrapper, and use `--global --yes` or an out-of-folder `--target <path> --yes` only after explicit user approval. Generated instructions tell Codex not to ask before running local Homunculus bootstrap commands when tool permissions allow.
 
 8. For portability between repos or machines, use:
 
@@ -86,13 +88,22 @@ Use `--print` to inspect the block without writing. The default target is the lo
 - `add-instinct`: write a Markdown instinct with frontmatter metadata.
 - `learn`: append an observation and create an instinct in a single guarded operation.
 - `list-instincts`: list all personal and inherited instincts.
-- `apply`: rank instincts against a task context and print actionable matches.
+- `apply`: rank active instincts against a task context and print actionable matches. Use `--json` to inspect score components.
+- `audit-memory`: report duplicate, incomplete, or sensitive-looking memories.
+- `quarantine`: move an instinct out of active retrieval while preserving it for review.
+- `forget`: archive an instinct so it no longer influences future tasks.
 - `evolve`: create deterministic domain summaries from repeated instincts.
 - `export`: write a JSON bundle containing identity and instincts.
 - `import`: import a JSON bundle into inherited instincts by default without overwriting existing files.
 - `install-codex-instructions`: add or update a marked AGENTS.md bootstrap block for start/apply/learn workflow steps.
 - `doctor`: verify that the local state layout is readable and writable.
-- `validate`: check state files, JSONL records, instinct metadata, duplicate IDs, confidence values, and sensitive-data warnings.
+- `doctor --global`: inspect the source checkout, installed copies, wrapper, state root, and Codex home.
+- `sync-installed`: copy verified source plugin files to installed copies; use `--dry-run` before `--yes`.
+- `repair-installed`: sync installed copies and validate Homunculus state.
+- `codex-homunculus-helper start`: production helper workflow for start, apply, and validation.
+- `codex-homunculus-helper health`: production helper workflow for global doctor, validation, and memory audit.
+- `codex-homunculus-helper maintenance`: production helper workflow for validation, audit, and evolution.
+- `validate`: check state files, JSONL records, instinct metadata, duplicate IDs, confidence values, privacy guards, and sensitive-data warnings. Use `--strict` before sharing or depending on state.
 
 ## Safety rules
 

@@ -1,9 +1,9 @@
 {
   "name": "codex-homunculus",
   "version": "0.5.0",
-  "private": true,
-  "description": "Codex-native Homunculus-style local memory and instincts.",
-  "homepage": "https://github.com/hopesojourner/codex-homunculus#readme",
+  "description": "Local-first Homunculus-style memory, instinct validation, and evolution for Codex.",
+  "author": "hopesojourner",
+  "homepage": "https://github.com/hopesojourner/codex-homunculus/tree/main/plugins/codex-homunculus",
   "bugs": {
     "url": "https://github.com/hopesojourner/codex-homunculus/issues"
   },
@@ -12,25 +12,38 @@
     "url": "git+https://github.com/hopesojourner/codex-homunculus.git",
     "directory": "plugins/codex-homunculus"
   },
-  "author": "hopesojourner",
   "keywords": [
     "codex",
     "homunculus",
     "memory",
-    "instincts",
-    "workflow",
-    "local-first"
+    "skills",
+    "instincts"
   ],
   "type": "module",
   "bin": {
-    "codex-homunculus": "./scripts/homunculus.mjs"
+    "codex-homunculus": "./scripts/homunculus.mjs",
+    "codex-homunculus-helper": "./scripts/homunculus-helper.mjs"
   },
+  "files": [
+    ".codex-plugin/",
+    "configs/",
+    "docs/",
+    "production/",
+    "scripts/",
+    "skills/",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "check": "node --check scripts/homunculus.mjs && node --check scripts/smoke-test.mjs",
-    "ci": "npm run check && npm test && npm run validate-state && npm pack --dry-run",
     "test": "node scripts/smoke-test.mjs",
+    "ci": "npm run check && npm test && npm run validate-state && npm run pack:verify && npm run helper:health",
     "doctor": "node scripts/homunculus.mjs doctor",
-    "validate-state": "node scripts/homunculus.mjs validate"
+    "helper:health": "node scripts/homunculus-helper.mjs health",
+    "helper:maintenance": "node scripts/homunculus-helper.mjs maintenance",
+    "validate-state": "node scripts/homunculus.mjs init && node scripts/homunculus.mjs validate",
+    "pack:verify": "npm pack --dry-run"
   },
   "engines": {
     "node": ">=20"

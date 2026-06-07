@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-blocked="$(git diff --cached --name-only -- identity.json observations.jsonl instincts evolved exports || true)"
+blocked="$(git diff --cached --name-only -- identity.json observations.jsonl instincts evolved exports quarantine archive .lock || true)"
 
 if [ -n "$blocked" ]; then
   echo "error: refusing to commit private Homunculus runtime state:" >&2

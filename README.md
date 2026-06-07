@@ -11,7 +11,7 @@ hooks or slash commands.
 ## Layout
 
 ```text
-.github/workflows/ci.yml
+.github/workflows/codex-homunculus-ci.yml
 .agents/plugins/marketplace.json
 CHANGELOG.md
 plugins/codex-homunculus/
@@ -31,6 +31,9 @@ PowerShell on Windows:
 ```powershell
 Set-Location plugins\codex-homunculus
 npm run ci
+node scripts\homunculus.mjs doctor --global
+node scripts\homunculus.mjs validate --strict
+node scripts\homunculus-helper.mjs health
 ```
 
 POSIX shell:
@@ -41,8 +44,8 @@ npm run ci
 ```
 
 `npm run ci` runs syntax checks, the smoke test, state validation, and
-`npm pack --dry-run`. The GitHub Actions workflow runs that check on Ubuntu and
-Windows with Node.js 20.
+`npm pack --dry-run`. The GitHub Actions workflows run that check on Ubuntu and
+Windows with their configured Node.js versions.
 
 ## CLI
 
@@ -55,6 +58,22 @@ Set-Location plugins\codex-homunculus
 .\scripts\codex-homunculus.ps1 learn --domain repo-debugging --trigger "user correction" --action "save a narrow instinct"
 .\scripts\codex-homunculus.ps1 install-codex-instructions
 .\scripts\codex-homunculus.ps1 validate
+node scripts\homunculus.mjs start
+node scripts\homunculus.mjs apply --context "repo debugging task"
+node scripts\homunculus.mjs learn --domain repo-debugging --trigger "user correction" --action "save a narrow instinct"
+node scripts\homunculus.mjs install-codex-instructions
+node scripts\homunculus.mjs validate
+node scripts\homunculus.mjs validate --strict
+node scripts\homunculus.mjs doctor --global
+node scripts\homunculus.mjs audit-memory
+node scripts\homunculus.mjs quarantine --id <instinct-id>
+node scripts\homunculus.mjs forget --id <instinct-id>
+node scripts\homunculus.mjs sync-installed --dry-run
+node scripts\homunculus.mjs sync-installed --yes
+node scripts\homunculus.mjs repair-installed --dry-run
+node scripts\homunculus-helper.mjs start --context "repo debugging task"
+node scripts\homunculus-helper.mjs health
+node scripts\homunculus-helper.mjs maintenance
 ```
 
 POSIX shell:
@@ -75,6 +94,26 @@ root unless `CODEX_HOMUNCULUS_DIR` / `--root` explicitly points there.
 `CODEX_HOMUNCULUS_HOME` pins the local Homunculus folder, and
 `CODEX_HOMUNCULUS_REPO` remains a backward-compatible alias for that setting.
 
+State-changing commands serialize through a local `.lock` folder and write JSON
+with atomic replacement so multiple Codex chats can run `start`, `apply`, or
+`learn` against the same Homunculus folder without corrupting `identity.json`.
+
+Use `audit-memory` to inspect duplicate, incomplete, or sensitive-looking
+instincts. Use `quarantine` to remove a questionable instinct from active
+retrieval while preserving it for review, and `forget` to archive an instinct
+out of active use.
+
+The production helper app wraps common live operations:
+
+- `start`: start, apply relevant instincts, and validate state.
+- `health`: run global doctor, validation, and memory audit.
+- `maintenance`: validate, audit, and evolve repeated instincts.
+- `install --yes`: sync installed copies and refresh global Codex instructions.
+
+On Windows, `scripts\install-production.ps1` now registers the weekly
+`Codex Homunculus Maintenance` scheduled task by default. Use
+`-NoMaintenanceTask` to opt out.
+
 When invoked from another repository, Homunculus still records that caller as
 the active project. `identity.json`, observations, and learned instinct
 metadata retain source repository details while files remain under the local
@@ -83,9 +122,14 @@ Homunculus folder.
 The local Homunculus folder is safe to initialize as a normal Git working tree.
 The CLI maintains a `.gitignore` block for runtime state, and `validate` fails
 if `identity.json`, `observations.jsonl`, `instincts/`, `evolved/`, or
-`exports/` are tracked. On POSIX, install `scripts/pre-commit-privacy-guard` as
+`exports/`, `quarantine/`, `archive/`, or `.lock/` are tracked. Install `scripts/pre-commit-privacy-guard` as
 `.git/hooks/pre-commit` in that local working tree for an extra commit-time
 block.
+
+Before relying on an installed copy after source changes, run `sync-installed
+--dry-run` and inspect the planned copy set. Use `sync-installed --yes` only
+when updating the local marketplace and plugin cache is intended, then verify
+with `doctor --global`.
 
 ## Codex Automation Boundary
 
@@ -145,3 +189,38 @@ and hooks:
 %USERPROFILE%\.claude\rules\codex-homunculus.md
 %USERPROFILE%\.codex\bin\vscode-homunculus-hook.ps1
 ```
+
+## Verified Windows Machine State
+
+This repository is currently verified against the Windows Codex setup on
+`C:\Users\Gchen`:
+
+- Real Codex home: `C:\Users\Gchen\.codex`
+- Source plugin: `plugins\codex-homunculus`
+- Local marketplace copy:
+  `C:\Users\Gchen\.codex\local-marketplaces\codex-homunculus\plugins\codex-homunculus`
+- Plugin cache copy:
+  `C:\Users\Gchen\.codex\plugins\cache\codex-homunculus\codex-homunculus\0.5.0`
+- Wrapper scripts:
+  `C:\Users\Gchen\.codex\bin\codex-homunculus.cmd`,
+  `C:\Users\Gchen\.codex\bin\codex-homunculus-helper.cmd`,
+  `C:\Users\Gchen\.codex\bin\codex-with-homunculus.cmd`, and
+  `C:\Users\Gchen\.codex\bin\vscode-homunculus-hook.ps1`
+- Global Codex instructions: `C:\Users\Gchen\.codex\AGENTS.md`
+- Homunculus state and local instructions: `C:\Users\Gchen\.codex\homunculus`
+- Weekly maintenance task: `Codex Homunculus Maintenance`
+- Global support skill:
+  `C:\Users\Gchen\.agents\skills\skills-global-install-verification`
+
+On this machine, `bash.exe` resolves to Windows Subsystem for Linux and WSL has
+no installed distribution. Do not use bare `bash` to manually test the
+`pre-commit-privacy-guard` script here. Git for Windows can still run the hook
+normally, and a manual check can use:
+
+```powershell
+& "C:\Program Files\Git\bin\sh.exe" plugins\codex-homunculus\scripts\pre-commit-privacy-guard
+```
+
+Codex MCP servers `git` and `playwright` are intentionally disabled in the
+local config. Leave heavy MCP helpers disabled unless there is a specific task
+that requires enabling them.

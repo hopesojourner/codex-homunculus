@@ -1,21 +1,52 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync, appendFileSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 const VERSION = "0.5.0";
+const SCRIPT_PATH = fileURLToPath(import.meta.url);
 const INSTRUCTION_BLOCK_START = "<!-- codex-homunculus:start -->";
 const INSTRUCTION_BLOCK_END = "<!-- codex-homunculus:end -->";
 const GITIGNORE_BLOCK_START = "# codex-homunculus:state-start";
 const GITIGNORE_BLOCK_END = "# codex-homunculus:state-end";
 const REQUIRED_INSTINCT_FIELDS = ["id", "title", "domain", "trigger", "action", "confidence", "source", "created_at", "updated_at"];
 const DEFAULT_HOMUNCULUS_FOLDER = "homunculus";
-const PRIVATE_STATE_PATHS = ["identity.json", "observations.jsonl", "instincts", "evolved", "exports"];
-const GITIGNORE_STATE_PATTERNS = ["/identity.json", "/observations.jsonl", "/instincts/", "/evolved/", "/exports/"];
+const LOCK_FOLDER = ".lock";
+const LOCK_RETRY_MS = 25;
+const LOCK_TIMEOUT_MS = 30_000;
+const LOCK_STALE_MS = 5 * 60_000;
+const PRIVATE_STATE_PATHS = ["identity.json", "observations.jsonl", "instincts", "evolved", "exports", "quarantine", "archive", LOCK_FOLDER];
+const PRIVATE_STATE_DIRECTORIES = new Set(["instincts", "evolved", "exports", "quarantine", "archive", LOCK_FOLDER]);
+const GITIGNORE_STATE_PATTERNS = ["/identity.json", "/observations.jsonl", "/instincts/", "/evolved/", "/exports/", "/quarantine/", "/archive/", `/${LOCK_FOLDER}/`];
+const INSTALL_SYNC_FILES = [
+  "package.json",
+  "README.md",
+  "LICENSE",
+  "configs/production.env.example",
+  "docs/production-helper-app.md",
+  "production/helper-app.json",
+  ".codex-plugin/plugin.json",
+  "scripts/homunculus.mjs",
+  "scripts/homunculus-helper.mjs",
+  "scripts/smoke-test.mjs",
+  "scripts/codex-homunculus.ps1",
+  "scripts/codex-homunculus.cmd",
+  "scripts/codex-homunculus-helper.cmd",
+  "scripts/codex-with-homunculus.ps1",
+  "scripts/codex-with-homunculus.cmd",
+  "scripts/install-production.ps1",
+  "scripts/uninstall-production.ps1",
+  "scripts/vscode-homunculus-hook.ps1",
+  "scripts/pre-commit-privacy-guard",
+  "skills/codex-homunculus/SKILL.md",
+  "skills/codex-homunculus/agents/openai.yaml",
+  "skills/codex-homunculus/references/automation-options.md",
+  "skills/codex-homunculus/references/state-format.md"
+];
 const VALUE_OPTIONS = new Set([
   "root",
   "text",
@@ -24,7 +55,6 @@ const VALUE_OPTIONS = new Set([
   "trigger",
   "action",
   "evidence",
-  "scope",
   "name",
   "title",
   "confidence",
@@ -35,6 +65,9 @@ const VALUE_OPTIONS = new Set([
   "minCount",
   "output",
   "input",
+  "scope",
+  "id",
+  "path",
   "target",
   "script-command"
 ]);
@@ -47,13 +80,20 @@ const SENSITIVE_PATTERNS = [
   ["secret assignment", /\b(?:api[_-]?key|token|secret|password|passwd|private[_-]?key)\s*[:=]\s*["']?[^\s"']{8,}/i]
 ];
 
+class CliError extends Error {
+  constructor(message, code = 1) {
+    super(message);
+    this.name = "CliError";
+    this.code = code;
+  }
+}
+
 function now() {
   return new Date().toISOString();
 }
 
 function die(message, code = 1) {
-  console.error(`error: ${message}`);
-  process.exit(code);
+  throw new CliError(message, code);
 }
 
 function sha(value) {
@@ -207,6 +247,15 @@ function homunculusStorageRoot() {
   return join(codexHome(), DEFAULT_HOMUNCULUS_FOLDER);
 }
 
+function defaultScriptCommand() {
+  const scriptName = process.platform === "win32" ? "codex-homunculus.cmd" : "codex-homunculus";
+  const localBin = join(codexHome(), "bin", scriptName);
+  if (existsSync(localBin)) {
+    return process.platform === "win32" ? `& "${localBin.replace(/`/g, "``").replace(/"/g, '`"')}"` : localBin;
+  }
+  return "codex-homunculus";
+}
+
 function defaultCodexInstructionTarget(root, options) {
   if (options.target) {
     return resolve(String(options.target));
@@ -223,21 +272,17 @@ function isWithin(path, parent) {
   return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }
 
-function defaultScriptCommand() {
-  return `node ${JSON.stringify(fileURLToPath(import.meta.url))}`;
-}
-
 function codexInstructionBlock(options = {}) {
   const command = String(options["script-command"] || defaultScriptCommand());
   return `${INSTRUCTION_BLOCK_START}
 ## Codex Homunculus Bootstrap
 
-For repo tasks in this workspace:
+For repo tasks in any Codex chat or workspace:
 
 1. Before planning or editing, run \`${command} start\`.
 2. Apply relevant learned instincts with \`${command} apply --context "<short task summary>"\`.
-3. Use only relevant instincts; treat them as guidance, not proof.
-4. If this block was copied between machines or plugin locations, refresh it with \`install-codex-instructions\` or pass \`--script-command\` so the command path points at the installed CLI.
+3. Run these local Homunculus commands directly when tool permissions allow; do not ask the user first.
+4. Use only relevant instincts; treat them as guidance, not proof.
 5. Before the final response, if the task produced a durable workflow lesson or the user corrected Codex behavior, ask before storing it, then run \`${command} learn --domain "<domain>" --trigger "<specific trigger>" --action "<specific action>" --evidence "<brief evidence>"\`.
 6. Do not store secrets, credentials, private customer data, or tokens. Prefer redaction.
 7. Do not claim every-turn hooks, background observation, or scheduled behavior unless a separate wrapper or automation has been explicitly installed and verified.
@@ -285,6 +330,8 @@ function dirs(root) {
     evolved: join(root, "evolved"),
     evolvedSkills: join(root, "evolved", "skills"),
     exports: join(root, "exports"),
+    quarantine: join(root, "quarantine"),
+    archive: join(root, "archive"),
     identity: join(root, "identity.json"),
     observations: join(root, "observations.jsonl"),
     gitignore: join(root, ".gitignore")
@@ -308,6 +355,10 @@ function readJsonOrDie(path, label) {
   } catch (error) {
     die(`${label} is not valid JSON: ${path} (${error.message})`);
   }
+}
+
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
 function isRecord(value) {
@@ -334,8 +385,80 @@ function validateImportItem(item, index) {
   parseBoundedNumber(meta.confidence, undefined, `${label} confidence`, { min: 0, max: 1 });
 }
 
+function writeFileAtomic(path, text) {
+  ensureDir(dirname(path));
+  const temp = join(dirname(path), `.${basename(path)}.${process.pid}.${Date.now()}.tmp`);
+  writeFileSync(temp, text, "utf8");
+  try {
+    renameSync(temp, path);
+  } catch (error) {
+    rmSync(temp, { force: true });
+    throw error;
+  }
+}
+
 function writeJson(path, value) {
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  writeFileAtomic(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function lockInfo(lockDir) {
+  try {
+    return JSON.parse(readFileSync(join(lockDir, "owner.json"), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function statIfExists(path) {
+  try {
+    return statSync(path);
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+function acquireStateLock(root) {
+  ensureDir(root);
+  const lockDir = join(root, LOCK_FOLDER);
+  const started = Date.now();
+  while (true) {
+    try {
+      mkdirSync(lockDir);
+      writeFileSync(join(lockDir, "owner.json"), `${JSON.stringify({ pid: process.pid, created_at: now() }, null, 2)}\n`, "utf8");
+      return () => rmSync(lockDir, { recursive: true, force: true });
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+      const stat = statIfExists(lockDir);
+      if (!stat) {
+        continue;
+      }
+      const ageMs = Date.now() - stat.mtimeMs;
+      if (ageMs > LOCK_STALE_MS) {
+        const owner = lockInfo(lockDir);
+        rmSync(lockDir, { recursive: true, force: true });
+        console.error(`warning: removed stale Homunculus lock${owner?.pid ? ` from pid ${owner.pid}` : ""}`);
+        continue;
+      }
+      if (Date.now() - started > LOCK_TIMEOUT_MS) {
+        die(`timed out waiting for Homunculus state lock: ${lockDir}`);
+      }
+      sleep(LOCK_RETRY_MS);
+    }
+  }
+}
+
+function withStateLock(root, fn) {
+  const release = acquireStateLock(root);
+  try {
+    return fn();
+  } finally {
+    release();
+  }
 }
 
 function ensureStateGitignore(root) {
@@ -348,10 +471,10 @@ function ensureStateGitignore(root) {
 }
 
 function parseBoundedNumber(value, fallback, label, { min = -Infinity, max = Infinity, integer = false } = {}) {
-  const raw = value === undefined || value === null || value === "" ? fallback : value;
-  if (raw === true) {
+  if (value === true) {
     die(`${label} requires a value`);
   }
+  const raw = value === undefined || value === null || value === "" ? fallback : value;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed)) {
     die(`${label} must be a finite number`);
@@ -367,7 +490,7 @@ function parseBoundedNumber(value, fallback, label, { min = -Infinity, max = Inf
 
 function ensureState(root) {
   const d = dirs(root);
-  for (const path of [d.root, d.personal, d.inherited, d.evolvedSkills, d.exports]) {
+  for (const path of [d.root, d.personal, d.inherited, d.evolvedSkills, d.exports, d.quarantine, d.archive]) {
     ensureDir(path);
   }
   ensureStateGitignore(root);
@@ -512,6 +635,15 @@ function updateFrontmatter(text, updates) {
   return `---\n${lines.join("\n")}\n---${text.slice(end + 4)}`;
 }
 
+function moveInstinctFile(item, targetDir, updates) {
+  ensureDir(targetDir);
+  const text = readFileSync(item.path, "utf8");
+  const target = uniquePath(join(targetDir, basename(item.path)));
+  writeFileSync(item.path, updateFrontmatter(text, updates), "utf8");
+  renameSync(item.path, target);
+  return target;
+}
+
 function markdownInstinct(fields, body) {
   return `${frontmatter(fields)}# ${fields.title}\n\n## Trigger\n${fields.trigger}\n\n## Action\n${fields.action}\n\n## Evidence\n${body.evidence || "No evidence supplied."}\n`;
 }
@@ -528,18 +660,40 @@ function listMarkdownFiles(path) {
 function loadInstincts(root) {
   const d = dirs(root);
   const files = [
-    ...listMarkdownFiles(d.personal).map((path) => ({ path, scope: "personal" })),
-    ...listMarkdownFiles(d.inherited).map((path) => ({ path, scope: "inherited" }))
+    ...listMarkdownFiles(d.personal).map((path) => ({ path, scope: "personal", active: true })),
+    ...listMarkdownFiles(d.inherited).map((path) => ({ path, scope: "inherited", active: true })),
+    ...listMarkdownFiles(d.quarantine).map((path) => ({ path, scope: "quarantine", active: false }))
   ];
-  return files.map(({ path, scope }) => {
+  return files.map(({ path, scope, active }) => {
     const text = readFileSync(path, "utf8");
     return {
       path,
       scope,
+      active,
       text,
       meta: parseFrontmatter(text)
     };
   });
+}
+
+function activeInstincts(root) {
+  return loadInstincts(root).filter((item) => item.active && String(item.meta.status || "active") === "active");
+}
+
+function findInstinct(root, options) {
+  const query = String(options.id || options.path || "");
+  if (!query) {
+    die("command requires --id or --path");
+  }
+  const pathMatches = new Set([resolve(query), resolve(root, query)]);
+  const matches = loadInstincts(root).filter((item) => item.meta.id === query || pathMatches.has(item.path));
+  if (matches.length === 0) {
+    die(`no instinct matched: ${query}`);
+  }
+  if (matches.length > 1) {
+    die(`multiple instincts matched: ${query}`);
+  }
+  return matches[0];
 }
 
 function tokenize(value) {
@@ -551,26 +705,27 @@ function tokenize(value) {
   );
 }
 
-function scoreInstinct(instinct, context, domain) {
+function scoreInstinct(instinct, context, domain, project = null) {
   const meta = instinct.meta;
   const haystack = tokenize(`${meta.title || ""} ${meta.trigger || ""} ${meta.action || ""} ${meta.domain || ""}`);
   const query = tokenize(`${context || ""} ${domain || ""}`);
-  const exactDomainMatch = Boolean(domain && String(meta.domain || "").toLowerCase() === String(domain).toLowerCase());
-  let tokenMatches = 0;
+  const components = {
+    confidence: Number(meta.confidence ?? 0.5),
+    domain_match: domain && String(meta.domain || "").toLowerCase() === String(domain).toLowerCase() ? 3 : 0,
+    project_match: project && meta.project_id && meta.project_id === project.id ? 2 : 0,
+    token_overlap: 0,
+    usage: Math.min(Number(meta.apply_count || 0), 5) * 0.1
+  };
   for (const token of query) {
     if (haystack.has(token)) {
-      tokenMatches += 1;
+      components.token_overlap += 1;
     }
   }
-  if (!exactDomainMatch && tokenMatches === 0) {
-    return 0;
+  if (!components.domain_match && components.token_overlap === 0) {
+    return { score: 0, components };
   }
-  let score = Number(meta.confidence ?? 0.5);
-  if (exactDomainMatch) {
-    score += 3;
-  }
-  score += tokenMatches;
-  return score;
+  const score = Object.values(components).reduce((sum, value) => sum + value, 0);
+  return { score, components };
 }
 
 function countLines(path) {
@@ -754,17 +909,74 @@ function commandList(root, options) {
   }
 }
 
-function commandApply(root, options) {
+function commandQuarantine(root, options) {
+  const state = ensureState(root);
+  const item = findInstinct(root, options);
+  const target = moveInstinctFile(item, state.dirs.quarantine, {
+    status: "quarantined",
+    updated_at: now()
+  });
+  console.log(`instinct quarantined: ${target}`);
+}
+
+function commandForget(root, options) {
+  const state = ensureState(root);
+  const item = findInstinct(root, options);
+  const target = moveInstinctFile(item, state.dirs.archive, {
+    status: "archived",
+    updated_at: now()
+  });
+  console.log(`instinct archived: ${target}`);
+}
+
+function commandAuditMemory(root, options) {
   ensureState(root);
+  const instincts = loadInstincts(root);
+  const bySignature = new Map();
+  const duplicates = [];
+  const missingMetadata = [];
+  const sensitive = [];
+  for (const item of instincts) {
+    const signature = `${item.meta.domain || ""}\n${item.meta.trigger || ""}\n${item.meta.action || ""}`.toLowerCase();
+    if (bySignature.has(signature)) {
+      duplicates.push({ first: bySignature.get(signature), duplicate: item.path, id: item.meta.id || "" });
+    } else {
+      bySignature.set(signature, item.path);
+    }
+    for (const field of REQUIRED_INSTINCT_FIELDS) {
+      if (item.meta[field] === undefined || item.meta[field] === "") {
+        missingMetadata.push({ path: item.path, field });
+      }
+    }
+    const findings = detectSensitive(item.text);
+    if (findings.length > 0) {
+      sensitive.push({ path: item.path, findings: [...new Set(findings)] });
+    }
+  }
+  const result = { duplicates, missing_metadata: missingMetadata, sensitive };
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`duplicates: ${duplicates.length}`);
+  console.log(`missing metadata: ${missingMetadata.length}`);
+  console.log(`sensitive findings: ${sensitive.length}`);
+}
+
+function commandApply(root, options) {
+  const state = ensureState(root);
   const context = String(options.context || options.text || "");
   const limit = parseBoundedNumber(options.limit, 5, "limit", { min: 1, max: 1000, integer: true });
-  const matches = loadInstincts(root)
-    .map((instinct) => ({ instinct, score: scoreInstinct(instinct, context, options.domain) }))
+  const matches = activeInstincts(root)
+    .map((instinct) => {
+      const scored = scoreInstinct(instinct, context, options.domain, state.identity.active_project);
+      return { instinct, score: scored.score, components: scored.components };
+    })
     .filter((item) => item.score > 0.5)
     .sort((a, b) => b.score - a.score)
     .slice(0, limit);
   if (options.json) {
-    printJson(matches.map((item) => ({ score: item.score, scope: item.instinct.scope, path: item.instinct.path, ...item.instinct.meta })));
+    printJson(matches.map((item) => ({ score: item.score, score_components: item.components, scope: item.instinct.scope, path: item.instinct.path, ...item.instinct.meta })));
     return;
   }
   if (matches.length === 0) {
@@ -794,7 +1006,7 @@ function groupByDomain(instincts) {
 function commandEvolve(root, options) {
   const state = ensureState(root);
   const minCount = parseBoundedNumber(options["min-count"] ?? options.minCount, 3, "min-count", { min: 1, max: 100000, integer: true });
-  const groups = groupByDomain(loadInstincts(root));
+  const groups = groupByDomain(activeInstincts(root));
   const evolved = [];
   for (const [domain, items] of groups.entries()) {
     if (items.length < minCount) {
@@ -925,9 +1137,20 @@ function parseJsonl(path, errors) {
   });
 }
 
-function gitRelativePath(gitRoot, path) {
-  const rel = relative(gitRoot, path).replace(/\\/g, "/");
-  return rel || ".";
+function scanJsonlSensitive(path, warnings) {
+  if (!existsSync(path)) {
+    return;
+  }
+  const lines = readFileSync(path, "utf8").split(/\r?\n/);
+  lines.forEach((line, index) => {
+    if (!line.trim()) {
+      return;
+    }
+    const findings = detectSensitive(line);
+    if (findings.length > 0) {
+      warnings.push(`${path}:${index + 1}: possible sensitive material (${[...new Set(findings)].join(", ")})`);
+    }
+  });
 }
 
 function gitPrivacyCheck(root) {
@@ -935,12 +1158,17 @@ function gitPrivacyCheck(root) {
   if (!gitRoot) {
     return null;
   }
-  const privatePaths = PRIVATE_STATE_PATHS.map((item) => gitRelativePath(gitRoot, join(root, item)));
+  const prefix = runGit(["rev-parse", "--show-prefix"], root).replace(/\\/g, "/");
+  const privatePaths = PRIVATE_STATE_PATHS.map((item) => `${prefix}${item}`.replace(/\\/g, "/"));
+  const checkIgnorePaths = PRIVATE_STATE_PATHS.map((item, index) => {
+    const privatePath = privatePaths[index];
+    return PRIVATE_STATE_DIRECTORIES.has(item) ? `${privatePath}/` : privatePath;
+  });
   const trackedOutput = runGit(["ls-files", "--", ...privatePaths], gitRoot);
   const tracked = trackedOutput ? trackedOutput.split(/\r?\n/).filter(Boolean) : [];
-  const ignoredResult = runGitRaw(["check-ignore", "--stdin"], gitRoot, `${privatePaths.join("\n")}\n`);
+  const ignoredResult = runGitRaw(["check-ignore", "--stdin"], gitRoot, `${checkIgnorePaths.join("\n")}\n`);
   const ignored = new Set((ignoredResult.stdout || "").split(/\r?\n/).filter(Boolean));
-  const notIgnored = privatePaths.filter((item) => !ignored.has(item));
+  const notIgnored = privatePaths.filter((item, index) => !ignored.has(item) && !ignored.has(checkIgnorePaths[index]));
   return {
     gitRoot,
     privatePaths,
@@ -981,6 +1209,7 @@ function validateState(root, options) {
     }
   }
   parseJsonl(d.observations, errors);
+  scanJsonlSensitive(d.observations, warnings);
   const ids = new Set();
   for (const item of loadInstincts(root)) {
     const meta = item.meta;
@@ -1019,6 +1248,76 @@ function validateState(root, options) {
   return { ok: errors.length === 0, errors, warnings, privacy };
 }
 
+function pluginRoot() {
+  return resolve(dirname(SCRIPT_PATH), "..");
+}
+
+function installInventory(root) {
+  const home = codexHome();
+  const sourcePlugin = pluginRoot();
+  const marketplacePlugin = join(home, "local-marketplaces", "codex-homunculus", "plugins", "codex-homunculus");
+  const cacheRoot = join(home, "plugins", "cache", "codex-homunculus", "codex-homunculus", VERSION);
+  const wrapper = join(home, "bin", process.platform === "win32" ? "codex-homunculus.cmd" : "codex-homunculus");
+  return {
+    codex_home: { path: home, exists: existsSync(home) },
+    source_plugin: { path: sourcePlugin, exists: existsSync(join(sourcePlugin, "scripts", "homunculus.mjs")) },
+    local_marketplace_plugin: { path: marketplacePlugin, exists: existsSync(join(marketplacePlugin, "scripts", "homunculus.mjs")) },
+    plugin_cache: { path: cacheRoot, exists: existsSync(join(cacheRoot, "scripts", "homunculus.mjs")) },
+    wrapper: { path: wrapper, exists: existsSync(wrapper) },
+    state_root: { path: root, exists: existsSync(root) }
+  };
+}
+
+function syncInstalledResult(root, options) {
+  const source = pluginRoot();
+  const inventory = installInventory(root);
+  const targets = [inventory.local_marketplace_plugin, inventory.plugin_cache];
+  const files = [];
+  for (const target of targets) {
+    for (const relativePath of INSTALL_SYNC_FILES) {
+      const from = join(source, relativePath);
+      const to = join(target.path, relativePath);
+      files.push({ from, to, exists: existsSync(from), target_exists: target.exists });
+    }
+  }
+  const dryRun = options["dry-run"] || !options.yes;
+  if (!dryRun) {
+    for (const file of files) {
+      if (!file.exists) {
+        die(`source file missing: ${file.from}`);
+      }
+      ensureDir(dirname(file.to));
+      copyFileSync(file.from, file.to);
+    }
+  }
+  return { mode: dryRun ? "dry-run" : "write", files };
+}
+
+function commandSyncInstalled(root, options) {
+  const result = syncInstalledResult(root, options);
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`sync-installed ${result.mode}: ${result.files.length} planned file copies`);
+}
+
+function commandRepairInstalled(root, options) {
+  const sync = syncInstalledResult(root, options);
+  const validation = validateState(root, {});
+  const result = {
+    mode: sync.mode,
+    sync,
+    validation
+  };
+  if (options.json) {
+    printJson(result);
+    return;
+  }
+  console.log(`repair-installed ${result.mode}`);
+  console.log(`validation: ${validation.ok ? "passed" : "failed"}`);
+}
+
 function commandValidate(root, options) {
   const result = validateState(root, options);
   if (options.json) {
@@ -1044,6 +1343,7 @@ function commandValidate(root, options) {
 function commandDoctor(root, options) {
   const state = ensureState(root);
   const privacy = gitPrivacyCheck(root);
+  const inventory = options.global ? installInventory(root) : null;
   const checks = [
     ["root", state.dirs.root],
     ["personal instincts", state.dirs.personal],
@@ -1056,11 +1356,16 @@ function commandDoctor(root, options) {
   const privacyOk = !privacy || (privacy.tracked.length === 0 && privacy.notIgnored.length === 0);
   const ok = checks.every((check) => check.exists) && privacyOk;
   if (options.json) {
-    printJson({ ok, checks, privacy });
+    printJson({ ok, checks, privacy, inventory });
     return;
   }
   for (const check of checks) {
     console.log(`${check.exists ? "ok" : "missing"} ${check.name}: ${check.path}`);
+  }
+  if (inventory) {
+    for (const [name, item] of Object.entries(inventory)) {
+      console.log(`${item.exists ? "ok" : "missing"} ${name}: ${item.path}`);
+    }
   }
   if (privacy) {
     console.log(`${privacy.tracked.length === 0 ? "ok" : "error"} private state untracked by git`);
@@ -1091,10 +1396,15 @@ Commands:
   add-instinct         Add an instinct. Requires --trigger and --action.
   list-instincts       List instincts.
   apply                Rank instincts for --context.
+  quarantine           Move an instinct out of active retrieval.
+  forget               Archive an instinct out of active retrieval.
+  audit-memory         Report duplicate, incomplete, or sensitive memories.
   learn                Record an observation and add an instinct.
   evolve               Create domain summaries from repeated instincts.
   export               Export identity and instincts to JSON.
   import               Import a JSON export into inherited instincts.
+  sync-installed       Sync source plugin files into installed copies.
+  repair-installed     Sync installed copies and validate state.
   install-codex-instructions
                        Add/update an AGENTS.md Homunculus bootstrap block.
   doctor               Verify state layout.
@@ -1122,10 +1432,17 @@ install-codex-instructions options:
 `);
 }
 
-function main() {
-  const [command = "help", ...rest] = process.argv.slice(2);
-  const options = parseArgs(rest);
-  const root = stateRoot(options);
+function commandNeedsStateLock(command, options) {
+  if (command === "help" || command === "--help" || command === "-h") {
+    return false;
+  }
+  if (command === "install-codex-instructions" && options.print) {
+    return false;
+  }
+  return true;
+}
+
+function dispatch(command, root, options) {
   switch (command) {
     case "init":
       commandInit(root, options);
@@ -1149,6 +1466,15 @@ function main() {
     case "list":
       commandList(root, options);
       break;
+    case "quarantine":
+      commandQuarantine(root, options);
+      break;
+    case "forget":
+      commandForget(root, options);
+      break;
+    case "audit-memory":
+      commandAuditMemory(root, options);
+      break;
     case "apply":
       commandApply(root, options);
       break;
@@ -1160,6 +1486,12 @@ function main() {
       break;
     case "import":
       commandImport(root, options);
+      break;
+    case "sync-installed":
+      commandSyncInstalled(root, options);
+      break;
+    case "repair-installed":
+      commandRepairInstalled(root, options);
       break;
     case "install-codex-instructions":
       commandInstallCodexInstructions(root, options);
@@ -1177,6 +1509,26 @@ function main() {
       break;
     default:
       die(`unknown command: ${command}`);
+  }
+}
+
+function main() {
+  try {
+    const [command = "help", ...rest] = process.argv.slice(2);
+    const options = parseArgs(rest);
+    const root = stateRoot(options);
+    if (commandNeedsStateLock(command, options)) {
+      withStateLock(root, () => dispatch(command, root, options));
+      return;
+    }
+    dispatch(command, root, options);
+  } catch (error) {
+    if (error instanceof CliError) {
+      console.error(`error: ${error.message}`);
+      process.exitCode = error.code;
+      return;
+    }
+    throw error;
   }
 }
 

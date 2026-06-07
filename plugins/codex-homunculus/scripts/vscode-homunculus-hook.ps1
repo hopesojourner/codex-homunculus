@@ -21,11 +21,20 @@ function Write-HookJson {
   exit 0
 }
 
+function Convert-HookInputJson {
+  param([string]$Json)
+  $command = Get-Command ConvertFrom-Json
+  if ($command.Parameters.ContainsKey("Depth")) {
+    return $Json | ConvertFrom-Json -Depth 50
+  }
+  return $Json | ConvertFrom-Json
+}
+
 $rawInput = [Console]::In.ReadToEnd()
 $hookInput = $null
 try {
   if (-not [string]::IsNullOrWhiteSpace($rawInput)) {
-    $hookInput = $rawInput | ConvertFrom-Json -Depth 50
+    $hookInput = Convert-HookInputJson $rawInput
   }
 } catch {
   $hookInput = $null
